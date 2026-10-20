@@ -1,0 +1,17 @@
+domain_fisher.py (text/x-python) 1079 bytes.
+functions_fisher.py (text/x-python) 5978 bytes.
+domain_ac.py (text/x-python) 1059 bytes.
+adaptive nonlinear c problem joint_new.ipynb (application/x-ipynb+json) 23569 bytes.
+functions_darcy.py (text/x-python) 6157 bytes.
+domain_darcy.py (text/x-python) 821 bytes.
+download_darcy.py (text/x-python) 985 bytes.
+adaptive nonlinear in state joint.ipynb (application/x-ipynb+json) 255826 bytes.
+functions_ac.py (text/x-python) 5735 bytes.
+adaptive modified allen cahn_gro.ipynb (application/x-ipynb+json) 609062 bytes.
+implicit_update_darcy.py (text/x-python) 1582 bytes.
+implicit_darcy.py (text/x-python) 1579 bytes.
+implicit_fisher.py (text/x-python) 1579 bytes.
+implicit_update_fisher.py (text/x-python) 1582 bytes.
+adaptive_darcy_joint gitlab.ipynb (application/x-ipynb+json) 181012 bytes.
+domain_nc.py (text/x-python) 722 bytes.
+functions_nc.py (text/x-python) 5960 bytes.
