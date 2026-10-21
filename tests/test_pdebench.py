@@ -1,4 +1,4 @@
-"""PDEBench Darcy loading: shapes, admissible values, centring roll."""
+"""PDEBench Darcy loading: shapes and admissible values."""
 
 import numpy as np
 import pytest
@@ -17,16 +17,6 @@ def test_default_grid_layout():
     # Stored in float32, so widen and round before comparing the values.
     values = np.round(np.unique(grid).astype(float), 5)
     assert set(values.tolist()) <= {0.1, 1.0}
-
-
-def test_roll_rows_centres_inclusion():
-    # The high-contrast zone spans rows 43..123 as stored; the Darcy
-    # problem's roll of 12 shifts it to rows 31..111.
-    plain = load_nu_grid(roll_rows=0)
-    rolled = load_nu_grid(roll_rows=12)
-    for grid, lo, hi in ((plain, 43, 123), (rolled, 31, 111)):
-        rows = np.flatnonzero((grid > 0.5).any(axis=1))
-        assert (int(rows.min()), int(rows.max())) == (lo, hi)
 
 
 def test_other_samples_load():

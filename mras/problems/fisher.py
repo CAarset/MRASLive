@@ -5,8 +5,7 @@ from ngsolve import (BilinearForm, GridFunction, Grad, IfPos,
                      LinearForm, cos, dx, exp, x as xc, y as yc)
 
 from ..domains import fisher
-from ..fields import to_gridfunc
-from ..noise import GaussianFEMNoise, seeded_rng
+from ..noise import GaussianFEMNoise
 from ..scheme import Problem
 from ..stepper import ImplicitStepper
 
@@ -23,8 +22,9 @@ class FisherProblem(Problem):
     step; the joint step linearises the reaction explicitly around the datum
     z: the residual carries ``dt * (g - z + z*z) * v``.
 
-    The pixel noise lives on the unit square inside this domain; outside the
-    unit box the mapped field continues by edge extrapolation.
+    The initial state equals the Gaussian profile of the time-harmonic
+    forcing at rest, ``u0 = 3 exp(-r^2 / G_WIDTH)``; measurement noise is the
+    seeded Gaussian FEM noise of :mod:`mras.noise`.
     """
 
     name = "fisher"
@@ -42,7 +42,6 @@ class FisherProblem(Problem):
         self.data_h = data_h
         self.data_order = data_order
         self.q_true = self._ring()
-        self.source_shape = (128, 128)
         self._generate()
 
     @staticmethod
@@ -52,17 +51,22 @@ class FisherProblem(Problem):
                 * IfPos(R_OUT ** 2 - r_sq, Q_IN, Q_OUT))
 
     @staticmethod
+    def _u0():
+        """The initial state u0 = 3 exp(-(x^2 + y^2) / 0.4)."""
+        return G_AMP * exp(-(xc * xc + yc * yc) / G_WIDTH)
+
+    @staticmethod
     def _g(time):
-        """The Gaussian forcing g(t) = 3 exp(-(x^2 + y^2)/0.4) cos(2 t)."""
-        return G_AMP * exp(-(xc * xc + yc * yc) / G_WIDTH) * cos(2 * time)
+        """The Gaussian forcing g(t) = 3 exp(-(x^2 + y^2) / 0.4) cos(2 t)."""
+        return FisherProblem._u0() * cos(2 * time)
 
     # -- ground truth ------------------------------------------------------
     def _generate(self):
         fine = fisher(maxh=self.data_h, order_u=self.data_order)
         V = fine.Ufes
         u, v = V.TnT()
-        self.u0_pixels = seeded_rng(self.seed).random(self.source_shape)
-        gf = to_gridfunc(self.u0_pixels, V)
+        gf = GridFunction(V)
+        gf.Set(self._u0())
         self.u_exact = np.empty((self.tsteps, self.Ufes.ndof), dtype=np.float32)
         proj = GridFunction(self.Ufes)
         t = 0.0
@@ -78,21 +82,15 @@ class FisherProblem(Problem):
             self.u_exact[counter] = proj.vec.FV().NumPy()
             t += self.dt
 
-    def u_at(self, counter):
-        gf = GridFunction(self.Ufes)
-        gf.vec.data = np.asarray(self.u_exact[counter], dtype=np.float64)
-        return gf
-
     # -- driver hooks --------------------------------------------------------
     def init_level(self, state):
-        u0 = self.u_at(0)
-        state.gfu.Set(u0)
-        state.u_true.Set(u0)
+        state.gfu.Set(self._u0())
+        state.u_true.Set(self._u0())
         state.gfq.Set(IfPos(xc + 1.15, 1, 0) * IfPos(1.15 - xc, 1, 0)
                       * IfPos(yc + 1.15, 1, 0) * IfPos(1.15 - yc, 1, 0))
 
     def data(self, state):
-        state.u_true.vec.data = np.asarray(self.u_exact[state.counter],
+        state.u_true.vec.data = np.asarray(self.u_exact[state.counter - 1],
                                            dtype=np.float64)
         state.set_z(self.noise.draw(state.u_true, state.level, state.counter))
         state.g = GridFunction(self.Ufes)

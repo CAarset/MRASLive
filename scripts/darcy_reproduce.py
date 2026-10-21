@@ -13,7 +13,9 @@ command resumes. Keep OMP_NUM_THREADS low on a busy machine.
 Outputs per level: <out>/darcy_<level>.npz (error histories + snapshots)
 and <out>/darcy_<level>.json (final errors); a combined <out>/table.json.
 
-Expected (Table 6, h=0.04, T=5): level 0 -> err_u ~ 0.02, err_q ~ 0.24.
+Expected behaviour (Tables 6-7, h=0.04, T=5): the clean level decays toward
+machine precision while err_q converges; noisy levels settle at a plateau of
+the order of the noise level.
 """
 
 import argparse
@@ -23,9 +25,9 @@ from pathlib import Path
 
 from mras.problems.darcy import DarcyProblem
 
-# Paper Fig 4 time instants and Table 6 rows, converted to step indices.
+# Paper Fig 4 time instants and Table 6 noise columns, as step indices.
 FIG_TIMES = [0.001, 0.05, 0.1, 0.5, 1.5, 5.0]
-TABLE_LEVELS = [0.0, 0.05, 0.10, 0.15, 0.20, 0.25]
+TABLE_LEVELS = [0.0, 0.05, 0.10, 0.20, 0.50]
 
 
 def main():
@@ -74,7 +76,7 @@ def main():
             json.dump(summary, fh, indent=1)
 
     print(f"\nsummary in {out / 'table.json'}")
-    print("compare with Table 6 (h=0.04): u 0.02 / q 0.24 at 0% noise")
+    print("compare with Table 6 (h=0.04 noise study)")
 
 
 if __name__ == "__main__":

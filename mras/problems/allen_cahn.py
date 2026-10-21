@@ -1,20 +1,22 @@
 """Modified Allen-Cahn benchmark (paper Section 5.3, Figures 9-11).
 
-The reference state is a separable sine profile with a linear time decay and
-a positive offset; the true parameter is piecewise constant on a three-piece
-domain partition.  Both the datum offset (``z_min``) and the noise model
-match the paper runs; see docs/PAPER_TARGETS.md for notes.
+The reference state is a separable sine profile decaying linearly in time
+toward a positive offset; the true parameter is piecewise constant on a
+three-piece domain partition.  The measurement noise is the seeded Gaussian
+FEM noise of :mod:`mras.noise`.
 """
 
 from ngsolve import (BilinearForm, Grad, GridFunction, IfPos, Integrate,
                      LinearForm, sqrt, sin, pi, dx, ds, x as xc, y as yc)
 
 from ..domains import allen_cahn
-from ..fields import l2norm, real_root
+from ..fields import l2norm
 from ..noise import GaussianFEMNoise
 from ..scheme import Problem
 
-Z_MIN, Z_MAX = 0.2, 1.0     # datum offset / bound entering C(.)
+DECAY_T = 10.0              # time scale of the linear decay (DECAY_T - t) / DECAY_T
+OFFSET = 1.0                # positive offset required by the analysis
+Z_MIN, Z_MAX = 0.2, 1.0     # state bounds entering the stabilisation bound C(.)
 V_BG, V_INC1, V_INC2 = 1.0, 4.0, 2.0   # inclusion values of q^dagger
 
 
@@ -36,13 +38,13 @@ class AllenCahnProblem(Problem):
 
     name = "allen_cahn"
     box = ((-2.0, -1.0), (2.0, 1.0))
-    counter_start = 0
+    counter_start = 1
     incremental = True
-    stop_margin = 1.0         # AC loop runs while t < tend - dt
+    stop_margin = 2.0
     sigma = 1.0
     L = 1.0
 
-    def __init__(self, h=0.1, dt=1e-3, tend=10.0, k_u=3, seed=0):
+    def __init__(self, h=0.1, dt=1e-3, tend=5.0, k_u=3, seed=0):
         super().__init__(allen_cahn(maxh=h, order_u=k_u), dt=dt, tend=tend,
                          k_u=k_u, seed=seed)
         self.series_counters = frozenset(
@@ -52,30 +54,24 @@ class AllenCahnProblem(Problem):
         self.q_true = piecewise_constant_field(self.mesh)
         self.u_wot = sin(0.25 * pi * (xc - 2)) * sin(0.5 * pi * (yc - 1))
         self._u_exact = GridFunction(self.Ufes)
-        self._u_exact_old = GridFunction(self.Ufes)
-        self._ut = GridFunction(self.Ufes)
+        # d/dt of the linear decay:  u^dagger = u_wot (DECAY_T - t) / DECAY_T + OFFSET
+        self._ut = -self.u_wot / DECAY_T
+        # ||q^dagger||_{L2}^{2/3} + ||q^dagger||_{L3}^{2/3}, with q^dagger > 0
         self._c_base = (l2norm(self.q_true, self.mesh) ** (2 / 3)
-                        + real_root(float(Integrate(self.q_true ** 3, self.mesh)), 3)
-                        ** (2 / 3))
+                        + float(Integrate(self.q_true ** 3, self.mesh)) ** (2 / 9))
 
     # -- driver hooks --------------------------------------------------------
     def init_level(self, state):
         # Self-contained fresh start: the reference state at t = 0 (decay
-        # factor 1) is both the initial estimate and the time-zero reference;
-        # _u_exact_old is primed so the first finite-difference u_t is sane.
-        self._u_exact.Set(self.u_wot + Z_MIN)
-        self._u_exact_old.Set(self._u_exact)
+        # factor 1) is both the initial estimate and the time-zero reference.
+        self._u_exact.Set(self.u_wot + OFFSET)
         state.gfu.Set(self._u_exact)
         state.u_true.Set(self._u_exact)
         state.gfq.Set(0)
 
     def data(self, state):
-        self._u_exact_old.vec.data = self._u_exact.vec.Copy()
-        decay = (self.tend - (state.t.Get() + self.dt)) / (self.tend - self.tstart)
-        self._u_exact.Set(self.u_wot * decay + Z_MIN)
-        self._ut.vec.data = self._u_exact.vec.Copy()
-        self._ut.vec.data -= self._u_exact_old.vec.Copy()
-        self._ut.vec.data /= self.dt
+        decay = (DECAY_T - (state.t.Get() + self.dt)) / DECAY_T
+        self._u_exact.Set(self.u_wot * decay + OFFSET)
         state.u_true.vec.data = self._u_exact.vec.Copy()
         state.set_z(self.noise.draw(self._u_exact, state.level, state.counter))
         state.ut = self._ut
@@ -105,7 +101,9 @@ class AllenCahnProblem(Problem):
         if noisy:
             res += sigma * dt * Grad(state.u_true) * Grad(self.s) * dx
         res += sigma * dt * qex * z * z * z * self.s * dx
-        res += dt * (1 + 0 * (5 / 3) * absq23) * z_old * (state.gfu - z_old) * self.s * dx
+        # tracking term z^n (u^n - z^n): the factor 1 + (5/3)|c~|^{2/3}
+        # equals 1 at the linearisation point c~ = 0 chosen in Example 5.3
+        res += dt * z_old * (state.gfu - z_old) * self.s * dx
         res += -sigma * dt * (zt + absq23 * gfq * z + gfq * z * z * z) * self.s * dx
         if noisy:
             res += -sigma * dt * Grad(z) * Grad(self.s) * dx

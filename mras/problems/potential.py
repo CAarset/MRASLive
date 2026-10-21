@@ -1,7 +1,8 @@
 """Nonlinear advection-diffusion benchmark (paper Section 5.2, Figures 7-8).
 
-The reference state u^dagger is a steady nonlinear vorticity speed field with
-a linear time decay and a positive offset; the parameter is q^dagger = pi - r.
+The reference state u^dagger is a steady nonlinear vorticity speed field
+decaying linearly in time toward a positive offset; the parameter is
+q^dagger = pi - r on the disk of radius pi.
 """
 
 import math
@@ -12,12 +13,14 @@ from ngsolve import (BilinearForm, Grad, GridFunction, H1, IfPos, Integrate,
 from ngsolve import grad
 
 from ..domains import potential
-from ..fields import l2norm, real_root
+from ..fields import l2norm
 from ..noise import GaussianFEMNoise
 from ..scheme import Problem
 
 NU = 0.1                    # vorticity-solve diffusion coefficient
-Z_MIN, Z_MAX = 0.1, 100.0   # datum offset / bounds entering C(.)
+DECAY_T = 6.0               # time scale of the linear decay (DECAY_T - t) / DECAY_T
+OFFSET = 6.0                # positive offset required by the analysis
+Z_MIN, Z_MAX = 0.1, 100.0   # state bounds entering the stabilisation bound C(.)
 PICARD_ITERS, PICARD_TOL, DAMPING = 15, 1e-9, 0.7
 
 
@@ -86,13 +89,13 @@ class PotentialProblem(Problem):
 
     name = "potential"
     box = ((-math.pi, -math.pi), (math.pi, math.pi))
-    counter_start = 0
+    counter_start = 1
     incremental = True
     stop_margin = 2.0
     sigma = 1.0
     L = 1.0
 
-    def __init__(self, h=0.1, dt=1e-3, tend=6.0, k_u=3, seed=2):
+    def __init__(self, h=0.1, dt=1e-3, tend=5.0, k_u=3, seed=2):
         super().__init__(potential(maxh=h, order_u=k_u), dt=dt, tend=tend,
                          k_u=k_u, seed=seed)
         self.series_counters = frozenset(
@@ -102,29 +105,24 @@ class PotentialProblem(Problem):
         self.q_true = math.pi - sqrt(xc * xc + yc * yc)
         self.u_wot = 25 * reference_speed(self.mesh, seed=seed)
         self._u_exact = GridFunction(self.Ufes)
-        self._u_exact_old = GridFunction(self.Ufes)
-        self._ut = GridFunction(self.Ufes)
+        # d/dt of the linear decay:  u^dagger = u_wot (DECAY_T - t) / DECAY_T + OFFSET
+        self._ut = -self.u_wot / DECAY_T
+        # ||q^dagger||_{L2}^{2/3} + ||q^dagger||_{L3}^{2/3}, with q^dagger >= 0
         self._c_offset = (l2norm(self.q_true, self.mesh) ** (2 / 3)
-                          + real_root(float(Integrate(self.q_true ** 3, self.mesh)), 3)
-                          ** (2 / 3))
+                          + float(Integrate(self.q_true ** 3, self.mesh)) ** (2 / 9))
 
     # -- driver hooks --------------------------------------------------------
     def init_level(self, state):
         # Self-contained fresh start: the reference state at t = 0 (decay
         # factor 1) doubles as the initial state estimate.
-        self._u_exact.Set(self.u_wot + Z_MIN)
-        self._u_exact_old.Set(self._u_exact)
+        self._u_exact.Set(self.u_wot + OFFSET)
         state.gfu.Set(self._u_exact)
         state.u_true.Set(self._u_exact)
         state.gfq.Set(0)
 
     def data(self, state):
-        self._u_exact_old.vec.data = self._u_exact.vec.Copy()
-        decay = (self.tend - (state.t.Get() + self.dt)) / self.tend
-        self._u_exact.Set(self.u_wot * decay + Z_MIN)
-        self._ut.vec.data = self._u_exact.vec.Copy()
-        self._ut.vec.data -= self._u_exact_old.vec.Copy()
-        self._ut.vec.data /= self.dt
+        decay = (DECAY_T - (state.t.Get() + self.dt)) / DECAY_T
+        self._u_exact.Set(self.u_wot * decay + OFFSET)
         state.u_true.vec.data = self._u_exact.vec.Copy()
         state.set_z(self.noise.draw(self._u_exact, state.level, state.counter))
         state.ut = self._ut
@@ -154,7 +152,9 @@ class PotentialProblem(Problem):
         if noisy:
             res += sigma * dt * Grad(state.u_true) * Grad(self.s) * dx
         res += sigma * dt * qex * z * self.s * dx
-        res += dt * (1 + 0 * (5 / 3) * absq23) * z_old * (state.gfu - z_old) * self.s * dx
+        # tracking term z^n (u^n - z^n): the factor 1 + (5/3)|c~|^{2/3}
+        # equals 1 at the linearisation point c~ = 0 chosen in Example 5.2
+        res += dt * z_old * (state.gfu - z_old) * self.s * dx
         res += -sigma * dt * (zt + absq23 * gfq * z + gfq * z) * self.s * dx
         if noisy:
             res += -sigma * dt * Grad(z) * Grad(self.s) * dx

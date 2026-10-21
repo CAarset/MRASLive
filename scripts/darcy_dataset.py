@@ -71,16 +71,16 @@ def main():
         return
 
     micro = dict(h=0.2, dt=1e-3, tend=0.02, seed=0)
-    rows = [run_case("pdebench sample 0 (paper dataset, rolled)", **micro),
-            run_case("pdebench sample 0, raw rows", roll_rows=0, **micro)]
+    rows = [run_case("pdebench sample 0 (paper dataset)", **micro)]
     for i, (kind, contrast) in enumerate(samples):
         rows.append(run_case(f"synthetic {kind} contrast 1:{int(1 / contrast)}",
-                             hdf5=h5, sample=i, roll_rows=0, **micro))
+                             hdf5=h5, sample=i, **micro))
 
     flag = ("Paper dataset check: identical MRAS setup on the paper's PDEBench "
             "field vs centred NGSolve-built fields of matching contrast. Large "
-            "gaps mean the off-centre inclusion of the raw sample drives the "
-            "reported errors; look at this before trusting table entries.")
+            "gaps mean the inclusion shape and placement of the raw sample "
+            "drive the reported errors; look at this before trusting table "
+            "entries.")
     report = {"note": flag, "rows": rows}
     with open(out / "comparison.json", "w") as fh:
         json.dump(report, fh, indent=1)

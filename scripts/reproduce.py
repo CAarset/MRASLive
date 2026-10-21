@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Reproduce the Fisher / potential / Allen-Cahn results (Fig 5-11, Tables 7-8).
+"""Reproduce the Fisher / potential / Allen-Cahn results (Fig 5-11, Tables 6-7).
 
 One level per process so a crash loses at most one level; finished levels
 are skipped when the output file already exists, so rerunning the same
@@ -8,7 +8,6 @@ command resumes. Keep OMP_NUM_THREADS low on a busy machine.
     cd /home/aarset/Documents/MRAS
     OMP_NUM_THREADS=4 .venv/bin/python scripts/reproduce.py --problem fisher
     # mesh/level overrides:   --h 0.05 --levels 0 0.05
-    # Fig 12 (q0 sensitivity): --problem potential --levels ... custom
     # wiring check (seconds):  --micro
 
 Outputs per level: <out>/<problem>_<level>.npz (error histories + snapshots)
@@ -24,16 +23,18 @@ from mras.problems.allen_cahn import AllenCahnProblem
 from mras.problems.fisher import FisherProblem
 from mras.problems.potential import PotentialProblem
 
-# paper figure time instants (converted to step indices) and Table 6 levels
+# Per-example paper configuration: run length, main-text noise levels and
+# figure time instants (converted to step indices).  Additional levels from
+# the Tables 6-7 studies are available via --levels.
 PROBLEMS = {
-    "fisher": {"cls": FisherProblem, "table": "Table 7",
+    "fisher": {"cls": FisherProblem, "tend": 10.0, "levels": [0.0, 0.03],
                "times": [0.001, 0.05, 0.1, 0.5, 1.5, 5.0]},
-    "potential": {"cls": PotentialProblem, "table": "Table 7",
+    "potential": {"cls": PotentialProblem, "tend": 5.0, "levels": [0.0, 0.05],
                   "times": [0.001, 0.05, 0.1, 0.5, 1.5, 5.0]},
-    "allen_cahn": {"cls": AllenCahnProblem, "table": "Table 8",
+    "allen_cahn": {"cls": AllenCahnProblem, "tend": 5.0,
+                   "levels": [0.0, 0.05, 0.10, 0.20],
                    "times": [0.001, 0.05, 0.075, 0.2, 0.5, 1.5, 5.0]},
 }
-TABLE_LEVELS = [0.0, 0.05, 0.10, 0.15, 0.20, 0.25]
 
 
 def main():
@@ -43,7 +44,8 @@ def main():
     ap.add_argument("--dt", type=float, default=1e-3)
     ap.add_argument("--tend", type=float)
     ap.add_argument("--seed", type=int, default=0, help="base seed")
-    ap.add_argument("--levels", type=float, nargs="+", default=TABLE_LEVELS)
+    ap.add_argument("--levels", type=float, nargs="+", default=None,
+                    help="noise levels (default: the example's main-text set)")
     ap.add_argument("--out", default=None)
     ap.add_argument("--micro", action="store_true",
                     help="tiny setup to check wiring, not the paper numbers")
@@ -51,12 +53,12 @@ def main():
 
     spec = PROBLEMS[args.problem]
     h = 0.2 if args.micro else (args.h or 0.1)
-    tend = 0.02 if args.micro else args.tend  # None -> problem default
-    levels = [0.0, 0.05] if args.micro else args.levels
+    tend = 0.02 if args.micro else args.tend  # None -> paper run length
+    levels = [0.0, 0.05] if args.micro else (args.levels or spec["levels"])
     out = Path(args.out or f"results/{args.problem}")
     out.mkdir(parents=True, exist_ok=True)
 
-    t_end = tend if tend is not None else spec["cls"]().tend
+    t_end = tend if tend is not None else spec["tend"]
     series_counters = [1] + [round(t / args.dt) for t in spec["times"][1:]]
     series_counters = [c for c in series_counters if c <= round(t_end / args.dt)]
     summary = {"problem": args.problem, "h": h, "dt": args.dt,
@@ -87,7 +89,7 @@ def main():
             json.dump(summary, fh, indent=1)
 
     print(f"\nsummary in {out / 'table.json'}")
-    print(f"compare with {spec['table']}")
+    print("compare with Tables 6-7 (space/time and noise studies)")
 
 
 if __name__ == "__main__":

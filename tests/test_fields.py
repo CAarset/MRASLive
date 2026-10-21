@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from ngsolve import CoefficientFunction
 
-from mras.fields import l2norm, real_root, to_gridfunc, to_gridfunc0
+from mras.fields import l2norm, to_gridfunc, to_gridfunc0
 
 
 def test_to_gridfunc_constant(small_darcy):
@@ -38,10 +38,3 @@ def test_l2norm_matches_area_scaling(small_darcy):
     mesh = small_darcy.mesh
     assert l2norm(CoefficientFunction(1.0), mesh) == pytest.approx(1.0, rel=1e-10)
     assert l2norm(CoefficientFunction(3.0), mesh) == pytest.approx(3.0, rel=1e-10)
-
-
-def test_real_root():
-    assert real_root(-8.0, 3) == pytest.approx(-2.0)
-    assert real_root(8.0, 3) == pytest.approx(2.0)
-    out = real_root(np.array([-27.0, 64.0]), 3)
-    assert np.allclose(out, [-3.0, 4.0])

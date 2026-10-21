@@ -38,8 +38,3 @@ def to_gridfunc0(values, fes, box=UNIT_BOX, band=0.05, linear=True):
 def l2norm(cf, mesh):
     """L2 norm of a coefficient over the mesh."""
     return float(Integrate(cf * cf, mesh)) ** 0.5
-
-
-def real_root(x, n):
-    """Signed n-th root (real branch), scalar or array."""
-    return np.sign(x) * abs(x) ** (1 / n)
