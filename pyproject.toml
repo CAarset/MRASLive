@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mras"
+version = "0.1.0"
+description = "Data assimilation via model reference adaptation (MRAS) for linear and nonlinear parabolic PDEs"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "ngsolve>=6.2",
+    "numpy",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+pdebench = ["h5py"]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["mras*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -53,7 +53,7 @@ checkpoint commit 4749311).
 - [x] P0 environment: .venv + deps, ngsolve smoke solve, HDF5 readable.
 - [x] P0 git: .gitignore (hdf5/npy/vol/PDF excluded), checkpoint commit.
 - [x] P1 paper targets → docs/PAPER_TARGETS.md.
-- [ ] P2 package skeleton + unit tests (noise normalisation, field mapping,
+- [x] P2 package skeleton + unit tests (noise normalisation, field mapping,
       seeding determinism, disk/square mesh dof counts vs Tables 2–5,
       known-solution steady check for the stepper).
 - [ ] P3 core scheme + Darcy end-to-end (reproduce Fig 4 + Table 6 row
@@ -78,4 +78,14 @@ checkpoint commit 4749311).
   numpy/matplotlib/h5py/pandas/tqdm/pytest), smoke Poisson solve OK,
   PDEBench hdf5 readable (nu 10000×128×128), checkpoint commit 4749311,
   PAPER_TARGETS.md written. Repo: no remote; linear history on main.
+- 2026-10-21 05:2x CEST — P2 complete: `mras/` package (domains, fields,
+  noise, stepper, scheme, results, 4 problems, PDEBench loader) installed
+  editable in .venv; pytest suite 27/27 green (dof anchors, boundary
+  behaviour, noise normalisation/determinism, stepper residual, PDEBench
+  grid, mini-run determinism + level chaining). Notable API findings on
+  6.2.2608: `GridFunction.Set` on H1 now projects rather than interpolates
+  (it also writes constrained dofs; Dirichlet is applied at solve time —
+  cross-build mini-runs agree, so behaviour stays faithful), coordinate
+  call is `gf(x, y)`, `BitArray.NumFree()` gone, `Grad(coord)` needs the
+  space dimension.
 - (next entries appended below)

@@ -17,3 +17,4 @@ MRAS_Paper.pdf
 results/
 data/
 campaign_state/
+*.egg-info/
