@@ -24,7 +24,7 @@ from ngsolve import (BilinearForm, GridFunction, IfPos, LinearForm, dx, grad,
 from mras.data.pdebench import load_nu_grid
 from mras.domains import darcy
 from mras.fields import l2norm, to_gridfunc, to_gridfunc0
-from mras.noise import NoiseModel
+from mras.noise import GaussianFEMNoise
 from mras.plotting import draw_field
 from mras.stepper import ImplicitStepper
 
@@ -73,7 +73,7 @@ def identify(dt, tsteps, levels, mesh, Ufes, Qfes, q_true, u_exact, u_init,
         error_q = [l2norm(gfq - q_true, mesh)]
         for i in range(tsteps - 1):
             z.Set(u_exact[i])
-            noise.draw(z, level, mesh)
+            z.Set(noise.draw(z, level, i + 1))
             # explicit L2-gradient step on the tracking functional
             f_deriv = grad(z) * (grad(gfu) - grad(z))
             rhs = LinearForm(Qfes)
@@ -107,10 +107,10 @@ def main():
 
     rng = np.random.default_rng(args.seed)
     grids = [rng.random((128, 128)) for _ in range(args.tsteps + 1)]
-    noise = NoiseModel(peaks=20, rng=rng)
 
     dom = darcy(maxh=args.h, order_u=3, order_q=0)
     mesh, Ufes, Qfes = dom.mesh, dom.Ufes, dom.Qfes
+    noise = GaussianFEMNoise(Ufes, seed=args.seed)
     dt = args.tend / args.tsteps
     q_true = to_gridfunc0(load_nu_grid(sample=args.sample), Qfes)
     V = darcy(maxh=args.h, order_u=2, order_q=0).Ufes

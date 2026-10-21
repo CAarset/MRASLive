@@ -6,7 +6,7 @@ from ngsolve import BilinearForm, GridFunction, Grad, LinearForm, dx
 from ..data.pdebench import load_nu_grid
 from ..domains import darcy
 from ..fields import to_gridfunc, to_gridfunc0
-from ..noise import NoiseModel
+from ..noise import GaussianFEMNoise, seeded_rng
 from ..scheme import Problem
 from ..stepper import ImplicitStepper
 
@@ -39,13 +39,13 @@ class DarcyProblem(Problem):
     stop_margin = 2.0
 
     def __init__(self, h=0.04, dt=1e-3, tend=5.0, k_u=3, sample=0,
-                 hdf5=None, roll_rows=12, seed=None, noise_peaks=20,
-                 data_h=DATA_H, data_order=DATA_ORDER, grid=GRID):
+                 hdf5=None, roll_rows=12, seed=0, data_h=DATA_H,
+                 data_order=DATA_ORDER, grid=GRID):
         super().__init__(darcy(maxh=h, order_u=k_u), dt=dt, tend=tend, k_u=k_u)
         self.series_counters = frozenset(
             [1, 5, 10, 25, 50, 75, 100, 200, 500, 1500, 5000, self.tsteps - 2])
-        self.noise = NoiseModel(peaks=noise_peaks,
-                                rng=np.random.default_rng(seed) if seed is not None else None)
+        self.seed = int(seed)
+        self.noise = GaussianFEMNoise(self.Ufes, seed=self.seed)
         self.data_h = data_h
         self.data_order = data_order
         nu = np.asarray(load_nu_grid(hdf5, sample=sample, roll_rows=roll_rows))
@@ -62,10 +62,7 @@ class DarcyProblem(Problem):
         """Backward-Euler ground truth plus the driving pixel stream."""
         fine = darcy(maxh=self.data_h, order_u=self.data_order)
         n = self.tsteps + 1
-        if self.noise.rng is not None:
-            pixels = self.noise.rng.random((n, *self.source_shape))
-        else:
-            pixels = np.random.rand(n, *self.source_shape)
+        pixels = seeded_rng(self.seed).random((n, *self.source_shape))
         self.sources = pixels.astype(np.float32)
         q_fine = to_gridfunc0(self.nu, fine.Qfes)
         u, v = fine.Ufes.TnT()
@@ -106,7 +103,7 @@ class DarcyProblem(Problem):
         counter = state.counter
         state.u_true.vec.data = np.asarray(self.u_exact[counter], dtype=np.float64)
         state.g = to_gridfunc(self.sources[counter], self.Ufes)
-        state.set_z(self.noise.draw(state.u_true, state.level, state.mesh))
+        state.set_z(self.noise.draw(state.u_true, state.level, counter))
 
     def forms(self, state):
         dt = self.dt

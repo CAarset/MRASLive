@@ -6,7 +6,7 @@ from ngsolve import (BilinearForm, CF, GridFunction, Grad, IfPos,
 
 from ..domains import fisher
 from ..fields import to_gridfunc
-from ..noise import NoiseModel
+from ..noise import GaussianFEMNoise, seeded_rng
 from ..scheme import Problem
 from ..stepper import ImplicitStepper
 
@@ -34,13 +34,13 @@ class FisherProblem(Problem):
     seed_initial_errors = False
     seed_saved = False
 
-    def __init__(self, h=0.1, dt=1e-3, tend=10.0, k_u=3, seed=None,
-                 noise_peaks=12, data_h=0.09, data_order=4):
+    def __init__(self, h=0.1, dt=1e-3, tend=10.0, k_u=3, seed=0,
+                 data_h=0.09, data_order=4):
         super().__init__(fisher(maxh=h, order_u=k_u), dt=dt, tend=tend, k_u=k_u)
         self.series_counters = frozenset(
             [1, 5, 10, 25, 50, 75, 100, 200, 500, 1500, 5000, self.tsteps - 2])
-        self.noise = NoiseModel(peaks=noise_peaks,
-                                rng=np.random.default_rng(seed) if seed is not None else None)
+        self.seed = int(seed)
+        self.noise = GaussianFEMNoise(self.Ufes, seed=self.seed)
         self.data_h = data_h
         self.data_order = data_order
         self.q_true = self._ring()
@@ -63,10 +63,7 @@ class FisherProblem(Problem):
         fine = fisher(maxh=self.data_h, order_u=self.data_order)
         V = fine.Ufes
         u, v = V.TnT()
-        if self.noise.rng is not None:
-            self.u0_pixels = self.noise.rng.random(self.source_shape)
-        else:
-            self.u0_pixels = np.random.rand(*self.source_shape)
+        self.u0_pixels = seeded_rng(self.seed).random(self.source_shape)
         gf = to_gridfunc(self.u0_pixels, V)
         self.u_exact = np.empty((self.tsteps, self.Ufes.ndof), dtype=np.float32)
         proj = GridFunction(self.Ufes)
@@ -98,7 +95,7 @@ class FisherProblem(Problem):
     def data(self, state):
         state.u_true.vec.data = np.asarray(self.u_exact[state.counter],
                                            dtype=np.float64)
-        state.set_z(self.noise.draw(state.u_true, state.level, state.mesh))
+        state.set_z(self.noise.draw(state.u_true, state.level, state.counter))
         state.g = GridFunction(self.Ufes)
         state.g.Set(self._g(state.t.Get()))
 

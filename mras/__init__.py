@@ -6,7 +6,7 @@ model reference adaptation for linear and nonlinear dynamical systems".
 
 from .domains import Domains, allen_cahn, darcy, fisher, potential
 from .fields import l2norm, real_root, to_gridfunc, to_gridfunc0
-from .noise import NoiseModel
+from .noise import GaussianFEMNoise, seeded_rng
 from .results import LevelResult
 from .scheme import Problem, State
 from .stepper import ImplicitStepper
@@ -14,7 +14,8 @@ from .stepper import ImplicitStepper
 __all__ = [
     "Domains", "allen_cahn", "darcy", "fisher", "potential",
     "l2norm", "real_root", "to_gridfunc", "to_gridfunc0",
-    "NoiseModel", "LevelResult", "Problem", "State", "ImplicitStepper",
+    "GaussianFEMNoise", "seeded_rng", "LevelResult", "Problem", "State",
+    "ImplicitStepper",
 ]
 
 __version__ = "0.1.0"

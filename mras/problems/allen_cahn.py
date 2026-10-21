@@ -11,7 +11,7 @@ from ngsolve import (BilinearForm, Grad, GridFunction, IfPos, Integrate,
 
 from ..domains import allen_cahn
 from ..fields import l2norm, real_root
-from ..noise import NoiseModel
+from ..noise import GaussianFEMNoise
 from ..scheme import Problem
 
 Z_MIN, Z_MAX = 0.2, 1.0     # datum offset / bound entering C(.)
@@ -43,14 +43,13 @@ class AllenCahnProblem(Problem):
     sigma = 1.0
     L = 1.0
 
-    def __init__(self, h=0.1, dt=1e-3, tend=10.0, k_u=3, noise_peaks=20):
+    def __init__(self, h=0.1, dt=1e-3, tend=10.0, k_u=3, seed=0):
         super().__init__(allen_cahn(maxh=h, order_u=k_u), dt=dt, tend=tend,
                          k_u=k_u)
         self.series_counters = frozenset(
             [1, 5, 25, 50, 75, 100, 200, 500, 1500, 2500, 5000,
              self.tsteps - 2])
-        self.noise = NoiseModel(peaks=noise_peaks,
-                                box=((-2.0, -1.0), (2.0, 1.0)))
+        self.noise = GaussianFEMNoise(self.Ufes, seed=int(seed))
         self.q_true = piecewise_constant_field(self.mesh)
         self.u_wot = sin(0.25 * pi * (xc - 2)) * sin(0.5 * pi * (yc - 1))
         self._u_exact = GridFunction(self.Ufes)
@@ -81,7 +80,7 @@ class AllenCahnProblem(Problem):
         self._ut.vec.data -= self._u_exact_old.vec.Copy()
         self._ut.vec.data /= self.dt
         state.u_true.vec.data = self._u_exact.vec.Copy()
-        state.set_z(self.noise.draw(self._u_exact, state.level, state.mesh))
+        state.set_z(self.noise.draw(self._u_exact, state.level, state.counter))
         state.ut = self._ut
 
     def c_value(self, gfq):

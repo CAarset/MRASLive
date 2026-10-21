@@ -90,7 +90,7 @@ class Problem:
         self.X = FESpace([self.Ufes, self.Qfes])
         self.u, self.q = self.X.TrialFunction()
         self.v, self.s = self.X.TestFunction()
-        self.noise = None      # NoiseModel, set by subclasses
+        self.noise = None      # GaussianFEMNoise, set by subclasses
         self.q_true = None     # exact parameter coefficient
 
     # -- hooks ----------------------------------------------------------

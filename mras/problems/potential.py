@@ -13,7 +13,7 @@ from ngsolve import grad
 
 from ..domains import potential
 from ..fields import l2norm, real_root
-from ..noise import NoiseModel
+from ..noise import GaussianFEMNoise
 from ..scheme import Problem
 
 NU = 0.1                    # vorticity-solve diffusion coefficient
@@ -93,16 +93,13 @@ class PotentialProblem(Problem):
     sigma = 1.0
     L = 1.0
 
-    def __init__(self, h=0.1, dt=1e-3, tend=6.0, k_u=3, noise_peaks=20,
-                 seed=2):
+    def __init__(self, h=0.1, dt=1e-3, tend=6.0, k_u=3, seed=2):
         super().__init__(potential(maxh=h, order_u=k_u), dt=dt, tend=tend,
                          k_u=k_u)
         self.series_counters = frozenset(
             [1, 5, 10, 25, 50, 75, 100, 200, 500, 1500, 4500, 5000,
              self.tsteps - 2])
-        self.noise = NoiseModel(peaks=noise_peaks,
-                                box=((-3.0, -3.0), (3.0, 3.0)),
-                                reseed_each_draw=True)
+        self.noise = GaussianFEMNoise(self.Ufes, seed=int(seed))
         self.q_true = math.pi - sqrt(xc * xc + yc * yc)
         self.u_wot = 25 * reference_speed(self.mesh, seed=seed)
         self._u_exact = GridFunction(self.Ufes)
@@ -129,7 +126,7 @@ class PotentialProblem(Problem):
         self._ut.vec.data -= self._u_exact_old.vec.Copy()
         self._ut.vec.data /= self.dt
         state.u_true.vec.data = self._u_exact.vec.Copy()
-        state.set_z(self.noise.draw(self._u_exact, state.level, state.mesh))
+        state.set_z(self.noise.draw(self._u_exact, state.level, state.counter))
         state.ut = self._ut
 
     def c_value(self, gfq):
