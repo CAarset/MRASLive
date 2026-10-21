@@ -6,16 +6,28 @@ resolution-independent and needs no ngsolve plotting windows.
 
 import numpy as np
 import matplotlib.pyplot as plt
+from netgen.libngpy._meshing import NgException
 
 __all__ = ["sample_field", "draw_field", "evolution_figure", "error_figure"]
 
 
 def sample_field(gf, box, n=128):
-    """Evaluate a grid function on an n x n grid over ``box`` -> (x, y, Z)."""
+    """Evaluate a grid function on an n x n grid over ``box`` -> (x, y, Z).
+
+    Grid points outside the mesh (e.g. the corners around a disk) are NaN,
+    which imshow renders transparent.
+    """
     lo, hi = box
     xs = np.linspace(lo[0], hi[0], n)
     ys = np.linspace(lo[1], hi[1], n)
-    Z = np.array([[gf(float(x), float(y)) for x in xs] for y in ys])
+
+    def at(x, y):
+        try:
+            return gf(float(x), float(y))
+        except NgException:
+            return np.nan
+
+    Z = np.array([[at(x, y) for x in xs] for y in ys])
     return xs, ys, Z
 
 
@@ -48,8 +60,8 @@ def evolution_figure(rows, box, col_labels=None, row_labels=None,
                              squeeze=False)
     for i, row in enumerate(rows):
         vals = [np.asarray(sample_field(gf, box, 32)[2]) for gf in row]
-        vmin = min(v.min() for v in vals)
-        vmax = max(v.max() for v in vals)
+        vmin = min(np.nanmin(v) for v in vals)
+        vmax = max(np.nanmax(v) for v in vals)
         for j, gf in enumerate(row):
             label = None
             if row_labels and col_labels:
