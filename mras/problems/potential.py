@@ -85,6 +85,7 @@ class PotentialProblem(Problem):
     """
 
     name = "potential"
+    box = ((-math.pi, -math.pi), (math.pi, math.pi))
     counter_start = 0
     incremental = True
     stop_margin = 2.0

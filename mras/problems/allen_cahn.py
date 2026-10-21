@@ -36,6 +36,7 @@ class AllenCahnProblem(Problem):
     """
 
     name = "allen_cahn"
+    box = ((-2.0, -1.0), (2.0, 1.0))
     counter_start = 0
     incremental = True
     stop_margin = 1.0         # AC loop runs while t < tend - dt

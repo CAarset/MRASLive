@@ -28,6 +28,7 @@ class FisherProblem(Problem):
     """
 
     name = "fisher"
+    box = ((-1.25, -1.25), (1.25, 1.25))
     counter_start = 1
     stop_margin = 2.0
     seed_initial_errors = False
