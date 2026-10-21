@@ -5,7 +5,7 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Large data: PDEBench files, saved trajectories, meshes, fonts-free caches.
-# Regenerate with the download scripts (checksums in data/pdebench_data_urls.csv).
+# Fetch it with the curl command in the README (checksum there too).
 *.hdf5
 *.npy
 *.vol
