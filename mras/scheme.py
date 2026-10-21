@@ -1,5 +1,7 @@
 """The MRAS time loop: data feed, joint (u, q) step, error tracking."""
 
+import time
+
 import numpy as np
 from ngsolve import (BilinearForm, FESpace, GridFunction, LinearForm,
                      Parameter, Preconditioner, specialcf)
@@ -116,6 +118,7 @@ class Problem:
 
     def run_level(self, level, progress=True, prev_state=None):
         from .results import LevelResult
+        started = time.perf_counter()
         state = State(self, level)
         self.init_level(state)
         self.on_level_start(state, prev_state)
@@ -161,7 +164,12 @@ class Problem:
             error_u=np.array(error_u), error_q=np.array(error_q),
             saved_gfu=np.array(saved_u), saved_gfq=np.array(saved_q),
             series_gfu=np.array(series_u), series_gfq=np.array(series_q),
-            state=state)
+            state=state,
+            meta={"dt": self.dt, "tend": self.tend,
+                  "dofs_u": len(state.gfu.vec.FV().NumPy()),
+                  "dofs_q": len(state.gfq.vec.FV().NumPy()),
+                  "steps": len(error_u),
+                  "seconds": round(time.perf_counter() - started, 1)})
         return result
 
     def run(self, levels, progress=True):
