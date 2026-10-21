@@ -1,127 +1,119 @@
-# Deviation report
+# Implementation notes
 
-Everything the new code does differently from the paper text or from a
-naively literal reading of the original notebooks, and everything that was
-left behind on purpose. Items marked **[ported quirk]** reproduce the
-original runs (which generated the published figures) rather than the paper
-equations; changing them would change the numbers.
+How the code realises the paper's theory, which free modelling choices were
+made concretely, and which behaviour is a known theoretical limit rather than
+a bug. The reference implementations for the published figures exist
+separately; this codebase targets the theory in the paper text with a clean,
+extensible design, so its numbers are its own.
 
-Status: all four problems and both demos are micro-verified with the new
-code (suite: 30 passed). Full-size reproduction of Figs 4–12 and
-Tables 6–8 is operator-run via the handoff scripts in `scripts/`; any entry
-that fails its table check will be flagged there, not hidden here.
+## Noise model — `mras/noise.py`
 
-## Noise model
+- Observations are `z = u_dagger + level * e / ||e||_M * ||u_dagger||_M`,
+  where `e ~ N(0, M^-1)` is an L2-Gaussian FEM field: the whitening
+  `e = M^(-1/2) eta`, `eta ~ N(0, I)` on the degrees of freedom, gives the
+  continuum-consistent covariance `M^-1` (nodal or mass-lumped whitening
+  would distort the spatial spectrum).
+- `M^(-1/2) eta` is applied matrix-function-free: the mass matrix is
+  diagonally scaled, `M~ = D^(-1/2) M D^(-1/2)` (condensation ~228 at
+  h = 0.1 on P3, from ~1.3e5 unscaled), and `M~^(-1/2) (D^(1/2) eta)` is
+  approximated by a Clenshaw-evaluated Chebyshev polynomial of degree
+  doubling until `max |1 - p(x) sqrt(x)| <= 5e-4` on `[0.7 lambda_min,
+  1.2 lambda_max]`, whose endpoints come from a Lanczos run of length 150.
+  Mass lumping is not used because row-sum lumping of a P3 mass matrix is
+  not positive.
+- The draw is renormalised by the exact energy `sqrt(e . M e)`, so
+  `||z - u_dagger||_L2 = level * ||u_dagger||_L2` holds exactly; level 0
+  returns the field unchanged.
+- Every draw is seeded: the RNG is keyed by `(seed, level, counter)`, so a
+  run is fully reproducible and each time step is statistically independent.
 
-- **[ported quirk]** Noise is uniform on [−1, 1] drawn on a coarse
-  `peaks x peaks` voxel grid and resampled, where the paper says Gaussian
-  128x128. Peaks per problem: Darcy 20, Fisher 12, potential 20, AC 20.
-- Noise is normalised so that `||noise||_L2 = level * ||field||_L2`
-  exactly, after the voxel resample; the paper only states the percentage
-  informally.
-- **[ported quirk]** Reseeding differs per problem: the potential problem
-  re-seeds before every draw (so its noise field is frozen-identical
-  across time, as in the original notebook), while Darcy, Fisher and AC
-  draw unseeded fresh noise each step.
-- The Fisher noise box spans the whole mesh; its dead boundary regex
-  (`"top|bottom|left|right"` against `"wall"` labels) means no Dirichlet
-  condition ever applies to the Fisher state space. **[ported quirk]**
+## Initial states, sources, references
 
-## Darcy (`mras/problems/darcy.py`)
+- All four benchmarks start from the paper's deterministic fields, and the
+  estimator starts in the exact initial state: error histories begin at
+  t = 0 with `error_u[0] = 0`, which isolates estimator convergence from
+  initial-condition transients (a test enforces this for all four).
+- Darcy (`mras/problems/darcy.py`): initial state
+  `sin(pi x) sin(pi y)`; the source is a fresh i.i.d. standard-normal
+  128x128 pixel field per time step (the paper's source model), rendered
+  onto the data mesh as piecewise-constant voxel coefficients. Truth runs
+  on the fine data mesh with the same per-step sources.
+- Fisher-KPP (`mras/problems/fisher.py`): deterministic Gaussian bump
+  `u0 = 3 exp(-r^2 / 0.4)`; forcing `g(x, t) = u0(x) cos(2 t)`; ring-shaped
+  true parameter 1 inside r = 0.5 and 0.25 outside r = 0.9.
+- Potential and Allen-Cahn: references
+  `u_dagger(x, t) = u_wot(x) (DECAY_T - t) / DECAY_T + OFFSET` with
+  (DECAY_T, OFFSET) = (6, 6) and (10, 1) respectively; `tend = 5` for both.
+  The time derivative `ut = -u_wot / DECAY_T` is analytic, and because the
+  profile is linear in t the backward-Euler difference of exact samples
+  equals `ut` identically.
+- Tracking coefficient: the potential and Allen-Cahn q-rows use
+  coefficient 1, the exact value of the linearisation factor
+  `1 + (5/3) |q_tilde|^(2/3)` at the paper's linearisation point
+  `q_tilde = 0` (Examples 5.2, 5.3).
 
-- Data come from PDEBench `2D_DarcyFlow_beta100.0_Train.hdf5`. Despite the
-  name, that file is the 10:1 contrast set (beta=100 is the *filename*
-  convention); the paper's 100:1 contrast therefore shows up as 10:1 here.
-  The NGSolve-built cross-check dataset (`scripts/darcy_dataset.py`) exists
-  to bracket this; it validates, it does not replace.
-- **[ported quirk]** The initial state `u0` is the (unseeded) first random
-  grid of the generator, not a deterministic field.
-- **[ported quirk]** The `a-dagger` auxiliary field is built with
-  `to_gridfunc0`, i.e. L2-P0, which bands the coefficient relative to the
-  paper's presentation.
-- **[ported quirk]** Rows of the PDEBench sample are rolled by −12 before
-  slicing, centring the sample-0 zone the original run used.
-- This is the only problem that seeds its error histories at t=0 (the
-  original notebook computed the initial errors; the others start empty).
+## Discretisation and driver — `mras/scheme.py`
 
-## Fisher–KPP (`mras/problems/fisher.py`)
+- Joint FEM solve on `X = FESpace([Ufes, Qfes])`, `solvers.BVP` with a
+  local (block-Jacobi) preconditioner; semi-implicit Euler. All
+  linearisation factors are taken at the new time level, except the two the
+  paper makes explicit: the tracking coefficient `f'_q(q_tilde, z^n)` and
+  the stabilisation bound `C(.)`, which stay at the previous level.
+- Potential and Allen-Cahn solve for the increments `(du, dq)` and add them
+  (the paper's schemes (35), (38)/(41) evaluate the parameter response
+  through trial increments); Darcy and Fisher solve directly for `(u, q)`.
+- NGSolve drops BilinearForm terms without a trial function silently, so
+  every term linear in an unknown enters as an implicit increment plus an
+  explicit previous-level half in the residual.
+- Each noise level is a fresh start: `run()` builds a new `State` per level,
+  `init_level` supplies the t = 0 reference and the initial estimate, and
+  `State.set_z` primes `z_old` with the level's first datum, so the data
+  difference term starts at zero on every level.
+- Dirichlet sets follow the reference fields: Fisher carries "wall"
+  conditions on U_h, Darcy's Q_h space is free, and potential/Allen-Cahn
+  use free spaces because their references do not vanish on the boundary.
+- With the P0 L2 parameter space, `Grad(s) = 0` and `s * ds` boundary pairs
+  evaluate to zero, so the s-row boundary-flux terms are omitted.
+- P3 U_h / P0 Q_h on the 2D unit geometries of `mras/domains.py`; data
+  meshes, sampling strides and figure instants are per-problem
+  (`data_h`, `data_order`, `series_counters`).
 
-- **[ported quirk]** `u0` is a random draw; the paper's figure caption
-  suggests the deterministic `3*exp(...)` initialisation.
-- **[ported quirk]** The reaction feedback `g` divides by 0.4 **and** lags
-  one step (`z_old`), where the paper writes an instantaneous `z`.
-- **[ported quirk]** `z_old` is initialised to the constant 1, and the
-  residual uses `(g − z + z^2)` (mixed old/current terms).
-- Geometry: rectangle (−1.25, ±1.25); combined with the dead boundary
-  regex above the estimator solves a fully natural (no-Dirichlet) problem.
+## Known theoretical limits (expected behaviour)
 
-## Nonlinear potential (`mras/problems/potential.py`)
+- Potential problem, constant mode: the `C(||c||)` H1 stabilisation acts
+  through `-Laplacian` and is blind to constants (the paper's Remark 6.2),
+  so with the offset reference `u_wot (...) + 6` the state error settles at
+  a floor set by that mode rather than decaying to zero.
+- The stabilisation bound uses the worst-case ratio `Z_MAX / Z_MIN` of the
+  admissible state range instead of instantaneous norms; this over-stabilises
+  and slows the observed decay but never destabilises.
 
-- **[ported quirk]** The contrast law uses the notebook's `C(gfq)`
-  formulas rather than the paper's `C_{c_n}` notation; same functions,
-  different labels.
-- **[ported quirk]** `L` is effectively hardcoded through the
-  `(1 + 0*(5/3)*absq23)` idiom (the zero multiplier keeps the notebook
-  shape while freezing the dependence).
-- **[ported quirk]** `z_min` late-binding: offset 0.1, init +1, ratio
-  1000, exactly as evaluated in the original notebook closure.
-- **[ported quirk]** The u-row of the joint system carries no trial-`q`
-  coupling (AC does); the parameter update therefore acts through the
-  q-row only.
-- `tend = 6` by default while the paper states T = 5 (the original run
-  over-ran by one time unit).
-- The disk mesh (radius π, `bc="circle"`) carries Dirichlet dofs only
-  through that label; the legacy `definedon=circle` no-ops were dropped.
+## Data — `mras/data/pdebench.py`
 
-## Allen–Cahn (`mras/problems/allen_cahn.py`)
+- `2D_DarcyFlow_beta100.0_Train.hdf5`: despite the filename convention
+  (beta = 100), the stored fields have 10:1 contrast. The synthetic
+  cross-check set in `scripts/darcy_dataset.py` brackets this with
+  NGSolve-built fields of matched contrast and centred inclusions.
 
-- **[ported quirk]** Same `C(gfq)` formulas as the potential problem.
-- **[ported quirk]** Offset 0.2 in the shift of the observed field.
-- **[ported quirk]** `sigma` multiplies the noise scale at a different
-  placement than the paper's formula (it ends up inside the normalisation,
-  not outside).
-- `tend = 10` by default while the paper states T = 5.
-- The u-row does carry the trial-`q` coupling here.
-- The s-row boundary-flux (`ds`) terms of the original notebook were
-  dropped: with the P0 test space they evaluate to zero on this mesh and
-  segfaulted on assembly in ngsolve 6.2.2608 (PAPER_TARGETS item 8).
-
-## Cross-cutting
-
-- **[ported quirk]** `error_q` is appended before `gfq` is updated, so the
-  q-error curve lags the state error by one step — matching the original
-  notebooks' append order.
-- **[ported quirk]** Solve style per problem: Darcy and Fisher solve
-  directly into `gf`; potential and AC solve into `aux` and add
-  (`gf.vec.data += aux.vec.data`, incremental mode).
-- Times sampled for the field figures follow the paper's figure instants,
-  converted to step indices (`series_counters`).
-
-## Environment behaviour (not deviations, but load-bearing)
+## Environment behaviour (load-bearing)
 
 - ngsolve 6.2.2608: `GridFunction.Set(coefficient)` on an H1 space
   *projects* (Gibbs overshoot at kinks — pointwise assertions on H1 are
   invalid; the tests use L2 comparisons).
 - Dirichlet conditions are applied at solve time via `FreeDofs`, so a
   `Set` may write constrained dofs without violating the BC after a solve.
+- `FreeDofs()` iterates as boolean flags (`np.fromiter(..., dtype=bool)`).
+- `to_gridfunc` maps pixel arrays through `VoxelCoefficient`; analytic
+  coefficient functions must go through `GridFunction.Set` directly.
 - `ImplicitStepper` needs `a.Assemble()` before construction (its matrix
   is merged in the constructor).
 
-## Not ported (deliberate)
-
-- The Helmholtz notebook's sample-21 nu zone-shift and per-step random
-  numpy sources: `examples/helmholtz_in_parameter.py` uses a
-  deterministic decaying analytic source instead.
-- **[ported quirk, for the record]** In the decaying-Darcy demo the
-  reaction source is the *constant final* random grid of the generator
-  (`grids[-1]`) at every step — an original-notebook quirk that the demo
-  preserves and documents inline.
-
 ## Verification anchors
 
-Micro runs (h 0.1–0.2, T 0.01, 5% noise, ngsolve 6.2.2608):
-darcy 0.045 / 0.397, fisher 0.080 / 1.410, potential 0.577 / 6.763,
-AC 0.579 / 6.831 (err_u / err_q). Helmholtz demo `--quick`:
-0.0043 / 0.0010 against `q_exact = 0`.
-Table 6 anchor for the full-size Darcy campaign (h = 0.04, 0% noise,
-T = 5): err_u ≈ 0.02, err_q ≈ 0.24, acceptance |Δ| ≤ 0.02.
+- `pytest tests/` (34 tests) covers the fixed-point bookkeeping (t = 0
+  error seeding for all four problems, seeded reproducibility, fresh-start
+  independence), the noise whitening (covariance moments, exact relative
+  level), degree-of-freedom anchors, and the field helpers.
+- `scripts/reproduce.py --micro` and `scripts/darcy_reproduce.py --micro`
+  are seconds-long wiring checks for every problem; full campaigns are the
+  operator-run handoff scripts.

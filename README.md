@@ -69,7 +69,7 @@ class MyProblem(Problem):
 pattern (nonlinear-in-parameter Helmholtz); `examples/darcy_decaying.py`
 shows the lower-level `ImplicitStepper` API.
 
-## Reproducing the paper results
+## Running the studies (Tables 6–8, Figs 4–12)
 
 Each campaign runs one noise level per process and resumes where a previous
 run stopped (finished levels are skipped).  Figures and the markdown table
@@ -80,7 +80,7 @@ are assembled from the saved runs afterwards.
 | Fig 4, Table 6 (Darcy) | `scripts/darcy_reproduce.py --out results/darcy` | `scripts/make_figures.py --problem darcy --in results/darcy` |
 | Table 7, Figs 5–8 (Fisher, potential) | `scripts/reproduce.py --problem fisher` / `--problem potential` | `scripts/make_figures.py --problem fisher` etc. |
 | Table 8, Figs 9–11 (Allen–Cahn) | `scripts/reproduce.py --problem allen_cahn` | `scripts/make_figures.py --problem allen_cahn` |
-| Fig 12 (q0 sensitivity) | `scripts/reproduce.py --problem potential --levels ...` with varied initial parameter | as above |
+| Fig 12 / Table 8 (q0 sensitivity) | vary the initial estimate in `init_level`, then `scripts/reproduce.py --problem fisher` / `--problem allen_cahn` | as above |
 | Darcy data cross-check | `scripts/darcy_dataset.py --quick` | writes `comparison.json` |
 
 Full-size runs are hours-long per level on 32 cores; every script accepts
@@ -107,7 +107,7 @@ docs/               cleanup plan, paper-target mapping, deviation report
 
 ## Notes on fidelity
 
-The package reproduces the published experiments with the schemes, noise
-models and data pipelines of the original runs; the deliberate
-implementation choices and residual differences are listed in
+The package implements the paper's schemes on deterministic, analytic
+benchmark fields with L2-Gaussian FEM observation noise; the modelling
+choices, theoretical limits and environment caveats are documented in
 [docs/DEVIATIONS.md](docs/DEVIATIONS.md).

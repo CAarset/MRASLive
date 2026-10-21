@@ -2,8 +2,8 @@
 """Build an NGSolve-side Darcy dataset and flag how it compares to PDEBench.
 
 The paper runs on PDEBench 2D_DarcyFlow_beta100.0_Train.hdf5; inspection of
-sample 0 showed a 10:1 contrast, not the 100:1 the filename promises (see
-docs/PAPER_TARGETS.md). This script writes a synthetic set with the same
+sample 0 showed a 10:1 contrast, not the 100:1 the filename promises. This
+script writes a synthetic set with the same
 hdf5 layout (/nu, N x 128 x 128) so every script accepts it via --hdf5,
 then optionally runs the same small MRAS setup on PDEBench and on the
 synthetic fields to produce a side-by-side table. The comparison is a

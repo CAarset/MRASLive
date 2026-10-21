@@ -1,14 +1,22 @@
 # MRAS cleanup — plan & progress log (overnight campaign)
 
 Objective: total from-scratch cleanup of the MRAS code into one
-Git-standardized, self-contained repo that (1) reproduces the paper
-(AMMC 2026, DOI 10.3934/ammc.2026005), (2) exposes a simple interface —
+Git-standardized, self-contained repo that (1) correctly implements the
+theory of the paper (AMMC 2026, DOI 10.3934/ammc.2026005) — the published
+figures stay reproducible from the separate GRO upload, this codebase
+targets the theory, (2) exposes a simple interface —
 user provides NGSolve mesh & weak form and MRAS "just happens", (3) is
 streamlined/clean/optimized, (4) carries honest comments describing current
 behaviour only. No backwards compatibility, no shims.
 
 ## Author decisions (2026-10-20/21)
 - GRO folder is canonical for paper numerics (normalised relative-L2 noise).
+- 2026-10-21 afternoon, supersedes the quirk-porting policy: theory
+  correctness and extensibility beat numeric reproduction. The ported-quirk
+  layer is removed in favour of canonical choices: Gaussian FEM noise
+  (M^-1/2 whitening), every draw seeded, deterministic paper initial states
+  and sources, aligned time-level indexing. Numerics need not match the
+  paper; they must be logically and theoretically consistent.
 - Interface: user supplies mesh, FE spaces, f(q,u) and q-directional
   derivative dq_f as NGSolve-expression hooks; driver assembles the joint
   semi-implicit scheme, time loop, noise, errors, saving.
@@ -41,7 +49,7 @@ mras/                  package
 examples/              one thin script per benchmark + figures + tables
 notebooks/             WebGUI drivers (import the package; no logic)
 tests/                 pytest suite
-docs/                  this file, PAPER_TARGETS.md
+docs/                  this file, PAPER_TARGETS.md, DEVIATIONS.md
 data/                  gitignored; downloaded artefacts
 results/               gitignored; campaign outputs (npy/png/csv)
 pyproject.toml, README.md, LICENSE (MIT, authors as in paper), .gitignore
@@ -75,8 +83,9 @@ checkpoint commit 4749311).
 
 ## Reproduction acceptance
 - Main figures: qualitatively matching panels regenerated from new code.
-- Tables 6–8: same setup re-run with new code; agreement target |Δ| ≤ 0.02
-  per entry; entries marked "–" must blow up or be flagged.
+- Tables 6–8: treated as order-of-magnitude context (docs/PAPER_TARGETS.md);
+  new-code results must be logically consistent — clean levels decay, noisy
+  levels plateau at the noise scale, Table-8 sensitivity trends reproduced.
 - Any systematic mismatch → flagged in the final report, not hidden.
 
 ## Progress log
@@ -113,3 +122,20 @@ checkpoint commit 4749311).
   + table.md), quickstart notebook, README, MIT LICENSE, legacy GRO/ and
   MRAS/ folders deleted (notebooks preserved in git history). Suite:
   30 passed.
+- 2026-10-21 16:1x CEST — Theory-consistency pass (three commits):
+  (1) `noise.py` Gaussian FEM noise — Chebyshev-filtered M^-1/2 whitening
+  with diagonal mass scaling, Lanczos spectral bounds, exact relative-level
+  renormalisation, per-draw seeding (seed, level, counter).
+  (2) Canonical driver — fresh start per level, t=0 seeding of both error
+  histories, z_old priming, Dirichlet canonicalisation, single seed knob on
+  the base Problem; trial-free BilinearForm terms (NGSolve drops them
+  silently) rewritten as implicit-increment + explicit-half pairs.
+  (3) Canonical setups — deterministic paper fields everywhere (Darcy
+  sin-pixel initial state and per-step N(0,1) sources, Fisher bump,
+  potential/AC decay+offset references), tracking coefficient 1 at the
+  paper's q~ = 0, analytic reference time derivatives, aligned
+  counter/u_true/source indexing; dropped real_root and PDEBench row
+  rolling. Suite: 34 passed. Docs rewritten (DEVIATIONS.md as
+  implementation notes, PAPER_TARGETS.md as table reference). Micro probes
+  confirm fixed-point consistency (clean exact-q runs stay at the
+  discretisation floor) and noise-ordered error plateaus.
