@@ -21,40 +21,52 @@ def _occ_rectangle(bcs, maxh, order_u, corners=((0, 0), (1, 1))):
 
 
 def darcy(maxh=0.04, order_u=3, order_q=0):
-    """Unit square, homogeneous Dirichlet on U_h and constrained Q_h."""
+    """Unit square, homogeneous Dirichlet on U_h; Q_h is unconstrained."""
     mesh = _occ_rectangle(("left", "right", "bottom", "top"), maxh, order_u)
     Ufes = H1(mesh, order=order_u, dirichlet="top|bottom|left|right")
-    Qfes = L2(mesh, order=order_q, dirichlet="top|bottom|left|right")
+    Qfes = L2(mesh, order=order_q)
     return Domains(mesh, Ufes, Qfes)
 
 
 def fisher(maxh=0.1, order_u=3, order_q=0):
-    """Square [-1.25, 1.25]^2; no Dirichlet conditions (pure Neumann-type feed)."""
+    """Square [-1.25, 1.25]^2, homogeneous Dirichlet on U_h; Q_h free.
+
+    The reference state decays like a Gaussian, so the homogeneous boundary
+    condition is essentially exact for the paper's setting.
+    """
     geo = SplineGeometry()
-    geo.AddRectangle((-1.25, -1.25), (1.25, 1.25),
-                     bcs=("wall", "outlet", "wall", "inlet"))
+    geo.AddRectangle((-1.25, -1.25), (1.25, 1.25), bcs=("wall",) * 4)
+    mesh = Mesh(geo.GenerateMesh(maxh=maxh))
+    Ufes = H1(mesh, order=order_u, dirichlet="wall")
+    Qfes = L2(mesh, order=order_q)
+    return Domains(mesh, Ufes, Qfes)
+
+
+def potential(maxh=0.1, order_u=3, order_q=0):
+    """Disk of radius pi; U_h and Q_h unconstrained.
+
+    The reference state does not vanish on the boundary, so imposing
+    homogeneous Dirichlet conditions on U_h would preclude convergence to
+    the true state (see docs/DEVIATIONS.md).
+    """
+    import math
+    geo = SplineGeometry()
+    geo.AddCircle(c=(0, 0), r=math.pi, bc="circle", leftdomain=1, rightdomain=0)
     mesh = Mesh(geo.GenerateMesh(maxh=maxh))
     Ufes = H1(mesh, order=order_u)
     Qfes = L2(mesh, order=order_q)
     return Domains(mesh, Ufes, Qfes)
 
 
-def potential(maxh=0.1, order_u=3, order_q=0):
-    """Disk of radius pi, homogeneous Dirichlet on U_h; Q_h unconstrained."""
-    import math
-    geo = SplineGeometry()
-    geo.AddCircle(c=(0, 0), r=math.pi, bc="circle", leftdomain=1, rightdomain=0)
-    mesh = Mesh(geo.GenerateMesh(maxh=maxh))
-    Ufes = H1(mesh, order=order_u, dirichlet="circle")
-    Qfes = L2(mesh, order=order_q)
-    return Domains(mesh, Ufes, Qfes)
-
-
 def allen_cahn(maxh=0.1, order_u=3, order_q=0):
-    """Rectangle [-2, 2] x [-1, 1], homogeneous Dirichlet on U_h."""
+    """Rectangle [-2, 2] x [-1, 1]; U_h and Q_h unconstrained.
+
+    As in the potential-flow benchmark, the reference state carries a
+    positive offset and is not representable in a Dirichlet space.
+    """
     geo = SplineGeometry()
-    geo.AddRectangle((-2, -1), (2, 1), bcs=("wall", "wall", "wall", "wall"))
+    geo.AddRectangle((-2, -1), (2, 1), bcs=("wall",) * 4)
     mesh = Mesh(geo.GenerateMesh(maxh=maxh))
-    Ufes = H1(mesh, order=order_u, dirichlet="wall")
+    Ufes = H1(mesh, order=order_u)
     Qfes = L2(mesh, order=order_q)
     return Domains(mesh, Ufes, Qfes)

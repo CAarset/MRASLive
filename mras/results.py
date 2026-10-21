@@ -19,8 +19,7 @@ class LevelResult:
     series_gfu: np.ndarray
     series_gfq: np.ndarray
     meta: dict = field(default_factory=dict)
-    # Final solver state of the level; lets a multi-level run carry
-    # cross-level data (z_old, reference states) into the next level.
+    # Final solver state of the level, kept for post-run field figures.
     state: object = None
 
     @property

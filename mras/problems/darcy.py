@@ -34,17 +34,16 @@ class DarcyProblem(Problem):
     """
 
     name = "darcy"
-    seed_initial_errors = True
     counter_start = 1
     stop_margin = 2.0
 
     def __init__(self, h=0.04, dt=1e-3, tend=5.0, k_u=3, sample=0,
                  hdf5=None, roll_rows=12, seed=0, data_h=DATA_H,
                  data_order=DATA_ORDER, grid=GRID):
-        super().__init__(darcy(maxh=h, order_u=k_u), dt=dt, tend=tend, k_u=k_u)
+        super().__init__(darcy(maxh=h, order_u=k_u), dt=dt, tend=tend,
+                         k_u=k_u, seed=seed)
         self.series_counters = frozenset(
             [1, 5, 10, 25, 50, 75, 100, 200, 500, 1500, 5000, self.tsteps - 2])
-        self.seed = int(seed)
         self.noise = GaussianFEMNoise(self.Ufes, seed=self.seed)
         self.data_h = data_h
         self.data_order = data_order
@@ -87,17 +86,15 @@ class DarcyProblem(Problem):
 
     # -- driver hooks ------------------------------------------------------
     def init_level(self, state):
-        state.gfu.Set(to_gridfunc(self.sources[0], self.Ufes))
+        a0 = to_gridfunc(self.sources[0], self.Ufes)
+        state.gfu.Set(a0)
+        state.u_true.Set(a0)
         state.gfq.Set(self.initial_guess())
 
     def initial_guess(self):
         """Disk indicator a_0 for the parameter initialisation."""
         from ngsolve import IfPos, x as xc, y as yc
         return IfPos(RADIUS ** 2 - ((xc - 0.5) ** 2 + (yc - 0.5) ** 2), 1, 0)
-
-    def seed_errors(self, state):
-        return ([_norm_diff(state.gfu, self.u_at(0), state.mesh)],
-                [_norm_diff(state.gfq, self.q_true, state.mesh)])
 
     def data(self, state):
         counter = state.counter
@@ -119,8 +116,3 @@ class DarcyProblem(Problem):
         res += state.gfq * self.s * dx
         res += dt * Grad(state.z_old) * (Grad(state.gfu) - Grad(state.z_old)) * self.s * dx
         return a, res
-
-
-def _norm_diff(u, v, mesh):
-    from ngsolve import Integrate
-    return float(Integrate((u - v) ** 2, mesh)) ** 0.5

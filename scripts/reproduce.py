@@ -73,8 +73,6 @@ def main():
         kwargs = {"h": h, "dt": args.dt, "seed": args.seed}
         if tend is not None:
             kwargs["tend"] = tend
-        if args.problem == "allen_cahn":
-            kwargs.pop("seed")  # the AC run is not seeded
         prob = spec["cls"](**kwargs)
         prob.series_counters = tuple(series_counters)
         result = prob.run(levels=[level], progress=True)[-1]

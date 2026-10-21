@@ -17,7 +17,7 @@ from ngsolve import dx, exp, grad, x, y
 from mras.domains import darcy
 from mras.noise import GaussianFEMNoise
 from mras.plotting import error_figure, evolution_figure
-from mras.scheme import Problem, l2diff
+from mras.scheme import Problem
 from mras.stepper import ImplicitStepper
 
 SOURCE = 2 * exp(-((x - 0.5) ** 2 / 0.05 + (y - 0.45) ** 2 / 0.1))
@@ -32,8 +32,8 @@ class HelmholtzProblem(Problem):
 
     def __init__(self, h=0.08, tend=1.5, tsteps=1000, k_u=3, seed=0):
         super().__init__(darcy(maxh=h, order_u=k_u, order_q=0),
-                         dt=tend / tsteps, tend=tend, k_u=k_u)
-        self.noise = GaussianFEMNoise(self.Ufes, seed=int(seed))
+                         dt=tend / tsteps, tend=tend, k_u=k_u, seed=seed)
+        self.noise = GaussianFEMNoise(self.Ufes, seed=self.seed)
         self.q_true = 0.0  # the ground-truth parameter is identically zero
         self.tpar = Parameter(0.0)
         self.coef_0, self.u_exact = self._make_data(h)
@@ -61,12 +61,8 @@ class HelmholtzProblem(Problem):
 
     def init_level(self, state):
         state.gfu.Set(self.coef_0)
+        state.u_true.Set(self.coef_0)  # exact state at t = 0
         state.gfq.Set(0.0)
-        state.z_old.Set(0.0)
-
-    def seed_errors(self, state):
-        return ([l2diff(state.gfu, self.u_exact[0], state.mesh)],
-                [l2diff(state.gfq, self.q_true, state.mesh)])
 
     def data(self, state):
         state.u_true.Set(self.u_exact[state.counter - 1])
@@ -97,6 +93,7 @@ def main():
     ap.add_argument("--tend", type=float, default=1.5)
     ap.add_argument("--tsteps", type=int, default=1000)
     ap.add_argument("--levels", type=float, nargs="+", default=[0.0, 0.05])
+    ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--quick", action="store_true", help="small sizes, seconds")
     ap.add_argument("--out", default="results/helmholtz")
     args = ap.parse_args()
@@ -106,7 +103,8 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    prob = HelmholtzProblem(h=args.h, tend=args.tend, tsteps=args.tsteps)
+    prob = HelmholtzProblem(h=args.h, tend=args.tend, tsteps=args.tsteps,
+                            seed=args.seed)
     results = prob.run(args.levels)
     for res in results:
         res.save(out)

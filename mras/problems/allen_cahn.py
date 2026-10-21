@@ -39,17 +39,16 @@ class AllenCahnProblem(Problem):
     counter_start = 0
     incremental = True
     stop_margin = 1.0         # AC loop runs while t < tend - dt
-    seed_initial_errors = False
     sigma = 1.0
     L = 1.0
 
     def __init__(self, h=0.1, dt=1e-3, tend=10.0, k_u=3, seed=0):
         super().__init__(allen_cahn(maxh=h, order_u=k_u), dt=dt, tend=tend,
-                         k_u=k_u)
+                         k_u=k_u, seed=seed)
         self.series_counters = frozenset(
             [1, 5, 25, 50, 75, 100, 200, 500, 1500, 2500, 5000,
              self.tsteps - 2])
-        self.noise = GaussianFEMNoise(self.Ufes, seed=int(seed))
+        self.noise = GaussianFEMNoise(self.Ufes, seed=self.seed)
         self.q_true = piecewise_constant_field(self.mesh)
         self.u_wot = sin(0.25 * pi * (xc - 2)) * sin(0.5 * pi * (yc - 1))
         self._u_exact = GridFunction(self.Ufes)
@@ -61,16 +60,14 @@ class AllenCahnProblem(Problem):
 
     # -- driver hooks --------------------------------------------------------
     def init_level(self, state):
-        decay = (self.tend - (self.tstart + self.dt)) / (self.tend - self.tstart)
-        state.gfu.Set(self.u_wot * decay + Z_MIN)
+        # Self-contained fresh start: the reference state at t = 0 (decay
+        # factor 1) is both the initial estimate and the time-zero reference;
+        # _u_exact_old is primed so the first finite-difference u_t is sane.
+        self._u_exact.Set(self.u_wot + Z_MIN)
+        self._u_exact_old.Set(self._u_exact)
+        state.gfu.Set(self._u_exact)
+        state.u_true.Set(self._u_exact)
         state.gfq.Set(0)
-
-    def on_level_start(self, state, prev_state):
-        # u_exact and z_old carry over across noise levels: every level
-        # observes the same reference trajectory.
-        if prev_state is not None:
-            self._u_exact.vec.data = prev_state.u_true.vec.Copy()
-            state.z_old.vec.data = prev_state.z.vec.Copy()
 
     def data(self, state):
         self._u_exact_old.vec.data = self._u_exact.vec.Copy()
@@ -102,12 +99,12 @@ class AllenCahnProblem(Problem):
         # parameter row
         a += self.q * self.s * dx
         a += sigma * dt * self.q * z * z * z * self.s * dx
-        a += sigma * dt * (absq23 * self.q * z + self.q * z) * self.s * dx
+        a += sigma * dt * absq23 * self.q * z * self.s * dx
         res += sigma * dt * ut * self.s * dx
         res += sigma * dt * qex23 * qex * state.u_true * self.s * dx
         if noisy:
             res += sigma * dt * Grad(state.u_true) * Grad(self.s) * dx
-        res += sigma * dt * qex * z * self.s * dx
+        res += sigma * dt * qex * z * z * z * self.s * dx
         res += dt * (1 + 0 * (5 / 3) * absq23) * z_old * (state.gfu - z_old) * self.s * dx
         res += -sigma * dt * (zt + absq23 * gfq * z + gfq * z * z * z) * self.s * dx
         if noisy:
@@ -123,7 +120,7 @@ class AllenCahnProblem(Problem):
         if noisy:
             res += dt * Grad(state.u_true) * Grad(self.v) * dx
             res += -dt * Grad(state.u_true) * state.n * self.v * ds
-        res += dt * qex * state.u_true * self.v * dx
+        res += dt * qex * z * z * z * self.v * dx
         res += -dt * absq23 * gfq * z * self.v * dx
         res += -dt * gfq * z * z * z * self.v * dx
         if noisy:

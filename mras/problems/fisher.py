@@ -1,7 +1,7 @@
 """Semilinear reaction-diffusion benchmark (Fisher-type; paper Figures 5-6)."""
 
 import numpy as np
-from ngsolve import (BilinearForm, CF, GridFunction, Grad, IfPos,
+from ngsolve import (BilinearForm, GridFunction, Grad, IfPos,
                      LinearForm, cos, dx, exp, x as xc, y as yc)
 
 from ..domains import fisher
@@ -31,15 +31,13 @@ class FisherProblem(Problem):
     box = ((-1.25, -1.25), (1.25, 1.25))
     counter_start = 1
     stop_margin = 2.0
-    seed_initial_errors = False
-    seed_saved = False
 
     def __init__(self, h=0.1, dt=1e-3, tend=10.0, k_u=3, seed=0,
                  data_h=0.09, data_order=4):
-        super().__init__(fisher(maxh=h, order_u=k_u), dt=dt, tend=tend, k_u=k_u)
+        super().__init__(fisher(maxh=h, order_u=k_u), dt=dt, tend=tend,
+                         k_u=k_u, seed=seed)
         self.series_counters = frozenset(
             [1, 5, 10, 25, 50, 75, 100, 200, 500, 1500, 5000, self.tsteps - 2])
-        self.seed = int(seed)
         self.noise = GaussianFEMNoise(self.Ufes, seed=self.seed)
         self.data_h = data_h
         self.data_order = data_order
@@ -87,10 +85,11 @@ class FisherProblem(Problem):
 
     # -- driver hooks --------------------------------------------------------
     def init_level(self, state):
-        state.gfu.Set(self.u_at(0))
+        u0 = self.u_at(0)
+        state.gfu.Set(u0)
+        state.u_true.Set(u0)
         state.gfq.Set(IfPos(xc + 1.15, 1, 0) * IfPos(1.15 - xc, 1, 0)
                       * IfPos(yc + 1.15, 1, 0) * IfPos(1.15 - yc, 1, 0))
-        state.z_old.Set(CF(1))
 
     def data(self, state):
         state.u_true.vec.data = np.asarray(self.u_exact[state.counter],

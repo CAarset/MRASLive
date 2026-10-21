@@ -79,9 +79,9 @@ class PotentialProblem(Problem):
     accompanying ``ds`` fluxes act through the state (H1) test function, the
     only one with a trace on the boundary.
 
-    The noise is re-seeded before every draw, so one frozen pattern is reused
-    at all time steps of a level.  ``z_old`` and the reference state carry
-    over from the end of the previous noise level, as in the paper runs.
+    The data z is drawn per step from seeded Gaussian FEM noise keyed by
+    (seed, level, counter).  Each noise level starts from the same clean
+    initial state; nothing carries over between levels.
     """
 
     name = "potential"
@@ -89,17 +89,16 @@ class PotentialProblem(Problem):
     counter_start = 0
     incremental = True
     stop_margin = 2.0
-    seed_initial_errors = False
     sigma = 1.0
     L = 1.0
 
     def __init__(self, h=0.1, dt=1e-3, tend=6.0, k_u=3, seed=2):
         super().__init__(potential(maxh=h, order_u=k_u), dt=dt, tend=tend,
-                         k_u=k_u)
+                         k_u=k_u, seed=seed)
         self.series_counters = frozenset(
             [1, 5, 10, 25, 50, 75, 100, 200, 500, 1500, 4500, 5000,
              self.tsteps - 2])
-        self.noise = GaussianFEMNoise(self.Ufes, seed=int(seed))
+        self.noise = GaussianFEMNoise(self.Ufes, seed=self.seed)
         self.q_true = math.pi - sqrt(xc * xc + yc * yc)
         self.u_wot = 25 * reference_speed(self.mesh, seed=seed)
         self._u_exact = GridFunction(self.Ufes)
@@ -111,12 +110,13 @@ class PotentialProblem(Problem):
 
     # -- driver hooks --------------------------------------------------------
     def init_level(self, state):
+        # Self-contained fresh start: the reference state at t = 0 (decay
+        # factor 1) doubles as the initial state estimate.
+        self._u_exact.Set(self.u_wot + Z_MIN)
+        self._u_exact_old.Set(self._u_exact)
         state.gfu.Set(self._u_exact)
+        state.u_true.Set(self._u_exact)
         state.gfq.Set(0)
-
-    def on_level_start(self, state, prev_state):
-        if prev_state is not None:
-            state.z_old.vec.data = prev_state.z.vec.Copy()
 
     def data(self, state):
         self._u_exact_old.vec.data = self._u_exact.vec.Copy()
@@ -162,8 +162,10 @@ class PotentialProblem(Problem):
         # state row
         a += self.u * self.v * dx
         a += dt * C * Grad(self.u) * Grad(self.v) * dx
-        a += dt * gfq * z * self.v * dx
-        a += dt * absq23 * gfq * z * self.v * dx
+        # parameter reaction enters through the trial increment, linearised
+        # with the |q^n|^(2/3) factor from the previous time level
+        a += dt * self.q * z * self.v * dx
+        a += dt * absq23 * self.q * z * self.v * dx
         res += -dt * absq23 * gfq * z * self.v * dx
         res += -dt * gfq * z * self.v * dx
         res += dt * qex23 * qex * state.u_true * self.v * dx

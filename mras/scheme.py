@@ -33,9 +33,17 @@ class State:
         self.z_old = GridFunction(problem.Ufes)
         self.u_true = GridFunction(problem.Ufes)
         self.zt = None  # problems set z, zt, (ut) inside data()
+        self.z_started = False
 
     def set_z(self, z):
-        """Copy a datum into the persistent z and refresh zt = (z - z_old)/dt."""
+        """Copy a datum into the persistent z and refresh zt = (z - z_old)/dt.
+
+        The first datum of a level also initialises ``z_old``, so ``zt``
+        starts at zero and every noise level is a fresh statistical start.
+        """
+        if not self.z_started:
+            self.z_old.vec.data = z.vec.Copy()
+            self.z_started = True
         self.z.vec.data = z.vec.Copy()
         self.zt = GridFunction(self.Ufes)
         self.zt.vec.data = self.z.vec.Copy()
@@ -65,8 +73,11 @@ class Problem:
                            (False).
     ``stop_margin``        loop runs while ``t < tend - stop_margin*dt``.
     ``counter_start``      first step index of the identification loop.
-    ``seed_initial_errors``prepend the t=0 errors to the error histories.
     ``series_counters``    step indices where solution snapshots are kept.
+
+    ``init_level`` sets the starting ``gfu``, ``gfq`` and the reference
+    ``u_true`` at ``tstart``; the driver records the t=0 errors and solution
+    snapshots before the first step, so every error history starts at t=0.
     """
 
     name = "problem"
@@ -75,17 +86,16 @@ class Problem:
     counter_start = 1
     incremental = False
     stop_margin = 2.0
-    seed_initial_errors = False
-    seed_saved = True         # include the t=0 snapshots in saved_* histories
     saved_every = 100
     series_counters = ()
     sigma = 1.0
     L = 1.0
 
-    def __init__(self, domains, dt=1e-3, tend=5.0, k_u=3):
+    def __init__(self, domains, dt=1e-3, tend=5.0, k_u=3, seed=0):
         self.mesh, self.Ufes, self.Qfes = domains
         self.dt = dt
         self.tend = tend
+        self.seed = int(seed)
         self.tsteps = int(round((tend - self.tstart) / dt))
         self.X = FESpace([self.Ufes, self.Qfes])
         self.u, self.q = self.X.TrialFunction()
@@ -95,7 +105,11 @@ class Problem:
 
     # -- hooks ----------------------------------------------------------
     def init_level(self, state):
-        """Set gfu / gfq / z_old initial values for one noise level."""
+        """Set gfu / gfq / u_true initial values for one noise level.
+
+        The driver mirrors gfu and gfq into the joint solver function, so
+        problems never touch state.gf directly.
+        """
 
     def data(self, state):
         raise NotImplementedError
@@ -103,28 +117,26 @@ class Problem:
     def forms(self, state):
         raise NotImplementedError
 
-    def seed_errors(self, state):
-        """Error histories at t = 0 (empty unless the benchmark seeds them)."""
-        return [], []
-
-    def on_level_start(self, state, prev_state):
-        """Carry data between noise levels (``prev_state`` is None for the first)."""
-
     # -- driver ---------------------------------------------------------
     def solve(self, a, res, target):
         pre = Preconditioner(a, "local")
         pre.Update()
         BVP(bf=a, lf=res, gf=target, pre=pre, print=False)
 
-    def run_level(self, level, progress=True, prev_state=None):
+    def run_level(self, level, progress=True):
         from .results import LevelResult
         started = time.perf_counter()
         state = State(self, level)
         self.init_level(state)
-        self.on_level_start(state, prev_state)
-        error_u, error_q = (list(e) for e in self.seed_errors(state))
-        saved_u = [state.gfu.vec.FV().NumPy().copy()] if self.seed_saved else []
-        saved_q = [state.gfq.vec.FV().NumPy().copy()] if self.seed_saved else []
+        # Mirror the initial estimate into the joint solver function: the
+        # incremental update is carried in state.gf, and BVP also uses it as
+        # the initial guess of the direct solve.
+        state.gf.components[0].Set(state.gfu)
+        state.gf.components[1].Set(state.gfq)
+        error_u = [l2diff(state.gfu, state.u_true, state.mesh)]
+        error_q = [l2diff(state.gfq, self.q_true, state.mesh)]
+        saved_u = [state.gfu.vec.FV().NumPy().copy()]
+        saved_q = [state.gfq.vec.FV().NumPy().copy()]
         series_u = [state.gfu.vec.FV().NumPy().copy()]
         series_q = [state.gfq.vec.FV().NumPy().copy()]
 
@@ -142,12 +154,11 @@ class Problem:
                 state.gf.vec.data += state.aux.vec.data
 
             state.gfu.Set(state.gf.components[0])
+            error_u.append(l2diff(state.gfu, state.u_true, state.mesh))
+            state.gfq.Set(state.gf.components[1])
             error_q.append(l2diff(state.gfq, self.q_true, state.mesh))
             if state.counter % self.saved_every == 0:
                 saved_q.append(state.gfq.vec.FV().NumPy().copy())
-            state.gfq.Set(state.gf.components[1])
-            error_u.append(l2diff(state.gfu, state.u_true, state.mesh))
-            if state.counter % self.saved_every == 0:
                 saved_u.append(state.gfu.vec.FV().NumPy().copy())
 
             state.z_old.vec.data = state.z.vec.Copy()
@@ -173,9 +184,5 @@ class Problem:
         return result
 
     def run(self, levels, progress=True):
-        results, prev = [], None
-        for level in levels:
-            result = self.run_level(level, progress, prev_state=prev)
-            results.append(result)
-            prev = result.state
-        return results
+        """One run per noise level; levels are statistically independent."""
+        return [self.run_level(level, progress) for level in levels]

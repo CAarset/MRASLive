@@ -84,14 +84,15 @@ def evolution_figure(rows, box, col_labels=None, row_labels=None,
 def error_figure(results, dt, fname=None, log=True, labels=None):
     """L2 error histories of ``results`` (one LevelResult per noise level).
 
-    Left column state u, right column parameter q; times are the step
-    centres ``dt * (1, 2, ...)``. Returns the figure.
+    Left column state u, right column parameter q; the first history entry
+    is the t = 0 error, so the time axis is ``dt * arange(len(error))``.
+    Returns the figure.
     """
     nrows = len(results)
     fig, axes = plt.subplots(nrows, 2, figsize=(8, 2.6 * nrows),
                              squeeze=False)
     for i, res in enumerate(results):
-        t = dt * (np.arange(len(res.error_u)) + 1)
+        t = dt * np.arange(len(res.error_u))
         for j, (err, name) in enumerate([(res.error_u, "u"), (res.error_q, "q")]):
             ax = axes[i][j]
             ax.plot(t, err)

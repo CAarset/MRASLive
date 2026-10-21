@@ -5,6 +5,8 @@ the free degrees of freedom and leaves constrained ones at zero, so
 boundary point evaluations reveal which spaces carry constraints.
 """
 
+import math
+
 import pytest
 from ngsolve import BilinearForm, GridFunction, LinearForm, solvers, dx
 
@@ -33,25 +35,33 @@ def _mass_solve(fes):
     return gf
 
 
-def test_darcy_fully_dirichlet():
-    gf = _mass_solve(darcy(maxh=0.2).Ufes)
-    assert gf(0.0, 0.5) == pytest.approx(0.0, abs=1e-12)
-    assert gf(0.5, 1.0) == pytest.approx(0.0, abs=1e-12)
-    assert gf(0.5, 0.5) == pytest.approx(1.0, abs=0.01)
+def test_darcy_u_dirichlet_q_free():
+    dom = darcy(maxh=0.2)
+    u = _mass_solve(dom.Ufes)
+    assert u(0.0, 0.5) == pytest.approx(0.0, abs=1e-12)
+    assert u(0.5, 1.0) == pytest.approx(0.0, abs=1e-12)
+    assert u(0.5, 0.5) == pytest.approx(1.0, abs=0.01)
+    q = _mass_solve(dom.Qfes)
+    assert q(0.1, 0.1) == pytest.approx(1.0, abs=0.01)
 
 
-def test_fisher_regex_quirk_leaves_space_free():
-    # The fisher boundary labels never match the Dirichlet regex, so the
-    # U_h space is fully free and constants survive a solve.
+def test_fisher_dirichlet_walls():
     gf = _mass_solve(fisher(maxh=0.2).Ufes)
-    assert gf(-1.25, 0.0) == pytest.approx(1.0, abs=0.01)
-    assert gf(0.0, 1.25) == pytest.approx(1.0, abs=0.01)
+    assert gf(-1.25, 0.0) == pytest.approx(0.0, abs=1e-12)
+    assert gf(0.0, 1.25) == pytest.approx(0.0, abs=1e-12)
+    assert gf(0.0, 0.0) == pytest.approx(1.0, abs=0.01)
 
 
-def test_allen_cahn_u_dirichlet_q_free():
+def test_potential_spaces_free():
+    # The reference state does not vanish on the circle, so U_h is free.
+    gf = _mass_solve(potential(maxh=0.3).Ufes)
+    assert gf(0.0, math.pi) == pytest.approx(1.0, abs=0.01)
+
+
+def test_allen_cahn_spaces_free():
     dom = allen_cahn(maxh=0.2)
     u = _mass_solve(dom.Ufes)
-    assert u(2.0, 0.0) == pytest.approx(0.0, abs=1e-12)
+    assert u(2.0, 0.0) == pytest.approx(1.0, abs=0.01)
     assert u(0.0, 0.0) == pytest.approx(1.0, abs=0.01)
     q = _mass_solve(dom.Qfes)
     assert q(1.9, 0.0) == pytest.approx(1.0, abs=0.01)
