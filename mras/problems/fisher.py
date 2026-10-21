@@ -5,7 +5,7 @@ from ngsolve import (BilinearForm, GridFunction, Grad, IfPos,
                      LinearForm, cos, dx, exp, x as xc, y as yc)
 
 from ..domains import fisher
-from ..noise import GaussianFEMNoise
+
 from ..scheme import Problem
 from ..stepper import ImplicitStepper
 
@@ -38,7 +38,6 @@ class FisherProblem(Problem):
                          k_u=k_u, seed=seed)
         self.series_counters = frozenset(
             [1, 5, 10, 25, 50, 75, 100, 200, 500, 1500, 5000, self.tsteps - 2])
-        self.noise = GaussianFEMNoise(self.Ufes, seed=self.seed)
         self.data_h = data_h
         self.data_order = data_order
         self.q_true = self._ring()

@@ -7,7 +7,7 @@ from ngsolve import (BilinearForm, GridFunction, Grad, LinearForm, dx, pi, sin,
 from ..data.pdebench import load_nu_grid
 from ..domains import darcy
 from ..fields import to_gridfunc, to_gridfunc0
-from ..noise import GaussianFEMNoise, seeded_rng
+from ..noise import seeded_rng
 from ..scheme import Problem
 from ..stepper import ImplicitStepper
 
@@ -48,7 +48,6 @@ class DarcyProblem(Problem):
                          k_u=k_u, seed=seed)
         self.series_counters = frozenset(
             [1, 5, 10, 25, 50, 75, 100, 200, 500, 1500, 5000, self.tsteps - 2])
-        self.noise = GaussianFEMNoise(self.Ufes, seed=self.seed)
         self.data_h = data_h
         self.data_order = data_order
         nu = np.asarray(load_nu_grid(hdf5, sample=sample))

@@ -1,6 +1,7 @@
 """The MRAS time loop: data feed, joint (u, q) step, error tracking."""
 
 import time
+from collections import namedtuple
 
 import numpy as np
 from ngsolve import (FESpace, GridFunction, Parameter, Preconditioner,
@@ -8,6 +9,17 @@ from ngsolve import (FESpace, GridFunction, Parameter, Preconditioner,
 from ngsolve.solvers import BVP
 
 from .fields import l2norm
+from .noise import GaussianFEMNoise
+
+
+class DataStep(namedtuple("DataStep", "fes u v u_prev t g dt")):
+    """One step of the forward (data-generating) solve.
+
+    ``fes`` is the data finite element space with trial/test functions
+    ``u``/``v``, ``u_prev`` the state at the previous time, ``t`` a
+    ``Parameter`` set to the new time, ``g`` the source from ``source(t)``
+    and ``dt`` the step size.
+    """
 
 
 class State:
@@ -34,6 +46,7 @@ class State:
         self.u_true = GridFunction(problem.Ufes)
         self.zt = None  # problems set z, zt, (ut) inside data()
         self.z_started = False
+        self.has_truth = True  # data() clears it for purely observational runs
 
     def set_z(self, z):
         """Copy a datum into the persistent z and refresh zt = (z - z_old)/dt.
@@ -57,27 +70,46 @@ def l2diff(u, v, mesh):
 
 
 class Problem:
-    """Base class: what a benchmark must provide for the generic driver.
+    """Base class: what a problem must provide for the generic driver.
 
-    Required hooks
-    --------------
-    ``data(state)``        set the datum ``state.z`` (via ``state.set_z``), the
-                           reference ``state.u_true`` and any extra step data.
+    Required hook
+    -------------
     ``forms(state)``       return the joint (BilinearForm, LinearForm) pair at
-                           the current step.
+                           the current step (the MRAS weak form of the model).
 
-    Optional configuration (class attributes)
-    -----------------------------------------
-    ``incremental``        solve for the increment into ``aux`` and add it to
-                           ``gf`` (True) or solve for the new state directly
-                           (False).
-    ``stop_margin``        loop runs while ``t < tend - stop_margin*dt``.
-    ``counter_start``      first step index of the identification loop.
-    ``series_counters``    step indices where solution snapshots are kept.
+    Data hooks (the base ``data()`` resolves them in this order)
+    ------------------------------------------------------------
+    ``observations(state)``  known data as a coefficient or grid function —
+                             use for measured data that already contains its
+                             own noise (run at level 0).
+    ``truth(state)``         ground-truth state ``u^dagger`` at ``state.t``;
+                             observations are synthesized as truth plus
+                             Gaussian FEM noise at the requested level.
+    ``forward_forms(step)``  one backward-Euler-type step of the model at
+                             ``step.t`` with the parameter frozen at
+                             ``q_true``; used when neither of the above is
+                             given, so NGSolve generates the data.
 
-    ``init_level`` sets the starting ``gfu``, ``gfq`` and the reference
-    ``u_true`` at ``tstart``; the driver records the t=0 errors and solution
-    snapshots before the first step, so every error history starts at t=0.
+    The driving source ``source(t)`` (a coefficient) is optional and is
+    placed in ``state.g`` for every step of the identification loop.
+
+    Optional configuration (class or instance attributes)
+    -----------------------------------------------------
+    ``u0``                   initial state (coefficient or grid function).
+    ``q_true``               true parameter (coefficient or grid function);
+                             error_q is reported only when it is known.
+    ``data_domains``         optional finer ``Domains`` for data generation.
+    ``incremental``          solve for the increment into ``aux`` and add it to
+                             ``gf`` (True) or solve for the new state directly
+                             (False).
+    ``stop_margin``          loop runs while ``t < tend - stop_margin*dt``.
+    ``counter_start``        first step index of the identification loop.
+    ``series_counters``      step indices where solution snapshots are kept.
+
+    ``init_level`` sets the starting ``gfu``, ``gfq`` (from ``initial_guess``)
+    and the reference ``u_true`` at ``tstart``; the driver records the t=0
+    errors and snapshots before the first step. Runs without ground truth
+    report the state misfit ``||u - z||`` instead of error histories.
     """
 
     name = "problem"
@@ -90,6 +122,9 @@ class Problem:
     series_counters = ()
     sigma = 1.0
     L = 1.0
+    u0 = None
+    q_true = None
+    data_domains = None
 
     def __init__(self, domains, dt=1e-3, tend=5.0, k_u=3, seed=0):
         self.mesh, self.Ufes, self.Qfes = domains
@@ -100,8 +135,8 @@ class Problem:
         self.X = FESpace([self.Ufes, self.Qfes])
         self.u, self.q = self.X.TrialFunction()
         self.v, self.s = self.X.TestFunction()
-        self.noise = None      # GaussianFEMNoise, set by subclasses
-        self.q_true = None     # exact parameter coefficient
+        self.noise = GaussianFEMNoise(self.Ufes, seed=self.seed)
+        self._snaps = None
 
     # -- hooks ----------------------------------------------------------
     def init_level(self, state):
@@ -110,12 +145,95 @@ class Problem:
         The driver mirrors gfu and gfq into the joint solver function, so
         problems never touch state.gf directly.
         """
+        if self.u0 is None:
+            raise NotImplementedError(
+                f"{self.name}: set u0 or override init_level")
+        state.gfu.Set(self.u0)
+        state.u_true.Set(self.u0)
+        state.gfq.Set(self.initial_guess())
+
+    def initial_guess(self):
+        """Starting value of the parameter estimate."""
+        return 0.0
+
+    def observations(self, state):
+        """Known data at this step (coefficient or grid function)."""
+
+    def truth(self, state):
+        """Ground-truth state at ``state.t`` (coefficient or grid function)."""
+
+    def source(self, t):
+        """Source coefficient of the state equation at time ``t``."""
+
+    def forward_forms(self, step):
+        """Weak form of one data-generation step; see ``DataStep``."""
 
     def data(self, state):
-        raise NotImplementedError
+        """Feed one step: resolve data, refresh u_true, g, and z."""
+        source = self.source(state.t)
+        if source is not None:
+            state.g = source
+        obs = self.observations(state)
+        truth = self.truth(state)
+        if obs is not None:
+            state.has_truth = truth is not None
+            if truth is not None:
+                self._set_reference(state, truth)
+            state.set_z(self._as_gf(obs))
+            return
+        if truth is not None:
+            self._set_reference(state, truth)
+        elif self._forward_data() is None:
+            raise NotImplementedError(
+                f"{self.name}: supply observations(), truth(), or "
+                "forward_forms() to generate data")
+        else:
+            state.u_true.vec.data = np.asarray(
+                self._snaps[state.counter - 1], dtype=np.float64)
+        state.set_z(self.noise.draw(state.u_true, state.level, state.counter))
 
     def forms(self, state):
         raise NotImplementedError
+
+    # -- forward (data-generating) model ---------------------------------
+    def _set_reference(self, state, value):
+        if isinstance(value, GridFunction):
+            state.u_true.vec.data = value.vec.Copy()
+        else:
+            state.u_true.Set(value)
+
+    def _as_gf(self, value):
+        if isinstance(value, GridFunction):
+            return value
+        gf = GridFunction(self.Ufes)
+        gf.Set(value)
+        return gf
+
+    def _forward_data(self):
+        """Generate observations by stepping the model at q = q_true."""
+        if self._snaps is None and (
+                type(self).forward_forms is not Problem.forward_forms):
+            fes = (self.data_domains.Ufes if self.data_domains is not None
+                   else self.Ufes)
+            u, v = fes.TnT()
+            t = Parameter(self.tstart)
+            gf = GridFunction(fes)
+            gf.Set(self.u0)
+            snaps = np.empty((self.tsteps, self.Ufes.ndof), dtype=np.float32)
+            snap = GridFunction(self.Ufes)
+            for k in range(self.tsteps):
+                t.Set(self.tstart + (k + 1) * self.dt)
+                step = DataStep(fes, u, v, gf, t, self.source(t) or 0, self.dt)
+                a, res = self.forward_forms(step)
+                a.Assemble()
+                res.Assemble()
+                nxt = GridFunction(fes)
+                self.solve(a, res, nxt)
+                gf.vec.data = nxt.vec.Copy()
+                snap.Set(gf)
+                snaps[k] = snap.vec.FV().NumPy()
+            self._snaps = snaps
+        return self._snaps
 
     # -- driver ---------------------------------------------------------
     def solve(self, a, res, target):
@@ -133,18 +251,25 @@ class Problem:
         # the initial guess of the direct solve.
         state.gf.components[0].Set(state.gfu)
         state.gf.components[1].Set(state.gfq)
-        error_u = [l2diff(state.gfu, state.u_true, state.mesh)]
-        error_q = [l2diff(state.gfq, self.q_true, state.mesh)]
+        truth_known = self._truth_known()
+        error_u = [l2diff(state.gfu, state.u_true, state.mesh)] \
+            if truth_known else None
+        error_q = [l2diff(state.gfq, self.q_true, state.mesh)] \
+            if truth_known and self.q_true is not None else None
+        misfit_u = []
         saved_u = [state.gfu.vec.FV().NumPy().copy()]
         saved_q = [state.gfq.vec.FV().NumPy().copy()]
         series_u = [state.gfu.vec.FV().NumPy().copy()]
         series_q = [state.gfq.vec.FV().NumPy().copy()]
 
         while state.t.Get() < self.tend - self.stop_margin * self.dt:
-            if progress:
-                print(f"\r{self.name} level={level}: t={state.t.Get():.3f}"
-                      f"/{self.tend}", end="", flush=True)
             self.data(state)
+            misfit_u.append(l2diff(state.gfu, state.z, state.mesh))
+            if progress:
+                headline = (error_u[-1] if error_u is not None
+                            else misfit_u[-1])
+                print(f"\r{self.name} level={level}: t={state.t.Get():.3f}"
+                      f"/{self.tend}  err={headline:.3e}", end="", flush=True)
             a, res = self.forms(state)
             a.Assemble()
             res.Assemble()
@@ -154,9 +279,11 @@ class Problem:
                 state.gf.vec.data += state.aux.vec.data
 
             state.gfu.Set(state.gf.components[0])
-            error_u.append(l2diff(state.gfu, state.u_true, state.mesh))
+            if error_u is not None and state.has_truth:
+                error_u.append(l2diff(state.gfu, state.u_true, state.mesh))
             state.gfq.Set(state.gf.components[1])
-            error_q.append(l2diff(state.gfq, self.q_true, state.mesh))
+            if error_q is not None and state.has_truth:
+                error_q.append(l2diff(state.gfq, self.q_true, state.mesh))
             if state.counter % self.saved_every == 0:
                 saved_q.append(state.gfq.vec.FV().NumPy().copy())
                 saved_u.append(state.gfu.vec.FV().NumPy().copy())
@@ -172,16 +299,24 @@ class Problem:
             print()
         result = LevelResult(
             problem=self.name, noise_level=level,
-            error_u=np.array(error_u), error_q=np.array(error_q),
+            error_u=np.array(error_u) if error_u is not None else None,
+            error_q=np.array(error_q) if error_q is not None else None,
+            misfit_u=np.array(misfit_u),
             saved_gfu=np.array(saved_u), saved_gfq=np.array(saved_q),
             series_gfu=np.array(series_u), series_gfq=np.array(series_q),
             state=state,
             meta={"dt": self.dt, "tend": self.tend,
                   "dofs_u": len(state.gfu.vec.FV().NumPy()),
                   "dofs_q": len(state.gfq.vec.FV().NumPy()),
-                  "steps": len(error_u),
+                  "steps": len(misfit_u),
                   "seconds": round(time.perf_counter() - started, 1)})
         return result
+
+    def _truth_known(self):
+        """True when some data path supplies a reference state."""
+        return (type(self).data is not Problem.data
+                or type(self).truth is not Problem.truth
+                or type(self).forward_forms is not Problem.forward_forms)
 
     def run(self, levels, progress=True):
         """One run per noise level; levels are statistically independent."""

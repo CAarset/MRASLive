@@ -11,7 +11,7 @@ from ngsolve import (BilinearForm, Grad, GridFunction, IfPos, Integrate,
 
 from ..domains import allen_cahn
 from ..fields import l2norm
-from ..noise import GaussianFEMNoise
+
 from ..scheme import Problem
 
 DECAY_T = 10.0              # time scale of the linear decay (DECAY_T - t) / DECAY_T
@@ -50,7 +50,6 @@ class AllenCahnProblem(Problem):
         self.series_counters = frozenset(
             [1, 5, 25, 50, 75, 100, 200, 500, 1500, 2500, 5000,
              self.tsteps - 2])
-        self.noise = GaussianFEMNoise(self.Ufes, seed=self.seed)
         self.q_true = piecewise_constant_field(self.mesh)
         self.u_wot = sin(0.25 * pi * (xc - 2)) * sin(0.5 * pi * (yc - 1))
         self._u_exact = GridFunction(self.Ufes)

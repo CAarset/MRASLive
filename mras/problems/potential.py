@@ -14,7 +14,7 @@ from ngsolve import grad
 
 from ..domains import potential
 from ..fields import l2norm
-from ..noise import GaussianFEMNoise
+
 from ..scheme import Problem
 
 NU = 0.1                    # vorticity-solve diffusion coefficient
@@ -101,7 +101,6 @@ class PotentialProblem(Problem):
         self.series_counters = frozenset(
             [1, 5, 10, 25, 50, 75, 100, 200, 500, 1500, 4500, 5000,
              self.tsteps - 2])
-        self.noise = GaussianFEMNoise(self.Ufes, seed=self.seed)
         self.q_true = math.pi - sqrt(xc * xc + yc * yc)
         self.u_wot = 25 * reference_speed(self.mesh, seed=seed)
         self._u_exact = GridFunction(self.Ufes)
