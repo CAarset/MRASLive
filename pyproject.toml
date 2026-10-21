@@ -13,6 +13,8 @@ dependencies = [
     "ngsolve>=6.2",
     "numpy",
     "matplotlib",
+    "pydantic>=2",
+    "PyYAML",
 ]
 
 [project.optional-dependencies]
