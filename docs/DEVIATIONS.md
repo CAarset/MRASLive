@@ -77,6 +77,81 @@ extensible design, so its numbers are its own.
 - P3 U_h / P0 Q_h on the 2D unit geometries of `mras/domains.py`; data
   meshes, sampling strides and figure instants are per-problem
   (`data_h`, `data_order`, `series_counters`).
+- Error metrics: `error_q` is the relative reconstruction error
+  `||qhat - q||_L2 / ||q||_L2` (the paper's benchmark tables report
+  relative errors, Sec. 8); `error_u` and the data misfit stay absolute.
+
+## Burgers pipe — `examples/burgers_pipe.py` (no paper benchmark)
+
+The Burgers identification is an application of the abstract scheme (4),
+not a published benchmark; the audit trail of its theory choices:
+
+Rigorous (the paper's assumptions are verified or exact):
+
+- `f(q, u) = -div(q grad u) + u u_x` is linear in `q`, so the
+  regularisation term is dropped (`sigma = 0`, the paper's rule for
+  `f` linear in `q`) and (A1) holds *exactly* with `L = 0` — the
+  tracking term is the exact adjoint, not a bound.
+- Adjoint: `f'_q(q, u)[s] = -div(s grad u)`, so the q-row of scheme (4)
+  is `D_t q = grad z . grad (u - z)` — Darcy's estimator equation
+  (Prop. 4.1) verbatim, since the advection `u u_x` carries no `q`.
+- Remark 2.1 placement: the state row evaluates the nonlinearity on the
+  datum — stabilisation `C(||q||)(u - z)` and explicit data-side
+  advection `-(z z_x, v)` — which is what cancels `z z_x` from the
+  continuous error system.
+- (A3): `C = -Laplace` with wall-homogeneous Dirichlet; the pipe sits in
+  `(0,6) x (0,1.2)`, so Poincare gives `lambda_1 >= pi^2 (1/36 + 1/1.44)`
+  `~ 7.13`, and with `L = 0` any `M <= lambda_1` satisfies (A3) (`M = 1`
+  as for Darcy).  The explicit q-flow gain is
+  `dt ||grad z||_inf^2 / (2 lambda_1)`; measured `||grad z||_inf ~ 12`
+  makes it `0.21` per unit `dt`, so `dt = 0.02` runs with margin.
+
+Ad-hoc modelling (no theory attached, none claimed):
+
+- The truth generator is backward Euler with lagged advection on the
+  data mesh; it produces observations only and enters no assumption.
+- Wake parameter `q_true`: logistic decay off the three hole centres
+  (`Q_WAKE = 0.15` -> `Q_FREE = 1.0`, scale `Q_SMOOTH = 0.0875`); the
+  smooth transition is a modelling choice (abrupt disks leave most of
+  the L2 error in the kink layer: measured wake-region error drops from
+  2.09 to 0.76 when the wake is smoothed, at unchanged global error).
+- Zero initial estimate `qhat = 0`; Gaussian-bump initial state.
+
+Open — where the code cannot force conformance:
+
+- (A2) coercivity of the coupled linearisation is unverified, exactly as
+  the paper leaves it for its own Darcy benchmark (Remark 4.2); the
+  justification there is persistent excitation (PE) of the source.
+- PE evidence (level 0, `h = 0.35`, `dt = 0.02`, relative `error_q`):
+
+  | source / horizon / wake | `error_q` | min over run |
+  |---|---|---|
+  | single frequency, abrupt wake, `T = 5` | 0.805 | 0.805 |
+  | same, `T = 15` | 0.788 | 0.788 |
+  | single frequency, smooth wake, `T = 5` | 0.785 | 0.785 |
+  | same, `T = 15` | 0.765 | 0.765 |
+  | single frequency, smooth wake, `dt = 0.005`, `T = 5` | 0.830 | 0.830 |
+  | distinct frequencies (in phase), smooth wake, `T = 5` | 0.776 | 0.776 |
+  | same, `T = 10` | 0.767 | 0.767 |
+  | drifting heater centres (spatial PE surrogate), `T = 10` | 0.773 | 0.773 |
+
+  while `||u - z||` stays near 0.02: the state tracks without
+  identifying `q`.  The plateau is insensitive to step size (finer is
+  worse: the update is rate-limited, not discretisation-limited),
+  horizon (longer helps only marginally), source frequency richness and
+  even spatial sweeping of the heaters — the signature of an
+  identifiability (PE/(A2)) gap in the `q -> z` map for this source
+  geometry, not of a discretisation or implementation defect.  For
+  comparison, the paper's own Darcy benchmark — with per-step i.i.d.
+  random pixel sources, i.e. maximal PE — recovers `q` only to relative
+  errors 0.33–0.60 (Table 6).
+- The shipped demo takes the best-behaving variants (smooth wake, distinct
+  frequencies on top of the original phase stagger, `T = 10`; measured
+  level-0 relative error 0.777 — the phase-staggered variant behaves like
+  the in-phase row above, within the plateau band).  The deeper question —
+  whether to accept the heater grid as PE surrogate, switch to per-step
+  randomised spatial sources (the Darcy benchmark's own recipe), or change
+  the model so that (A2) becomes verifiable — is open and recorded here.
 
 ## Known theoretical limits (expected behaviour)
 
@@ -110,10 +185,12 @@ extensible design, so its numbers are its own.
 
 ## Verification anchors
 
-- `pytest tests/` (34 tests) covers the fixed-point bookkeeping (t = 0
+- `pytest tests/` (55 tests) covers the fixed-point bookkeeping (t = 0
   error seeding for all four problems, seeded reproducibility, fresh-start
   independence), the noise whitening (covariance moments, exact relative
-  level), degree-of-freedom anchors, and the field helpers.
+  level), degree-of-freedom anchors, the field helpers, the Burgers
+  conformance form, and the live helper (hook throttling, relative-error
+  seeding, the fixed-framerate movie stitch).
 - `scripts/reproduce.py --micro` and `scripts/darcy_reproduce.py --micro`
   are seconds-long wiring checks for every problem; full campaigns are the
   operator-run handoff scripts.

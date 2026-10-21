@@ -46,19 +46,24 @@ error_figure(results, prob.dt, fname="errors.png")
 
 ## Live notebook
 
-`mras_live.ipynb` shows one run in six live `ngsolve.webgui` canvases —
+`notebooks/mras_live.ipynb` runs one noise level and stitches the frames
+into a fixed-framerate mp4 with static colorbars —
 
 ```
 datum z  |  data error u - z  |  ground truth u at final time
 estimate qhat  |  error qhat - q  |  true parameter q
 ```
 
-The notebook only picks an example (`burgers`, `darcy`, `fisher`,
-`potential`, `allen_cahn`) and a noise level; `mras/live.py` holds all the
-plumbing (demo sizing, panels, the `on_step` callback, throttled redraws).
-It opens with the Burgers pipe at level 0; run it with
-`jupyter lab mras_live.ipynb` (the canvases stream from a CDN, so the
-browser needs internet).
+Each colorbar spans the global extremes of its category (both state
+panels share one range, the parameter panels share theirs, both error
+panels are symmetric about zero), and the panels carry no interactive
+chrome, so colours are comparable across every frame.  Pass `live=True`
+to stream the same six panels interactively in `ngsolve.webgui` canvases
+instead (those stream from a CDN, so the browser needs internet).  The
+notebook only picks an example (`burgers`, `darcy`, `fisher`,
+`potential`, `allen_cahn`) and a noise level; `mras/live.py` holds all
+the plumbing (demo sizing, frame recording, static ranges, the ffmpeg
+stitch).  Run it with `jupyter lab notebooks/mras_live.ipynb`.
 
 ## Bring your own mesh and weak form
 
