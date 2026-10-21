@@ -1,4 +1,4 @@
-"""Live helper: the scheme hook fires, panels throttle and track the run."""
+"""Live helper: the scheme hook fires, panels throttle, movies stitch."""
 
 import numpy as np
 import pytest
@@ -42,9 +42,17 @@ def test_panels_throttle_and_track_the_final_state():
 
 
 def test_run_live_restores_the_hook_and_returns_results():
-    result = run_live("burgers", 0.0, every=2, **MICRO)
+    result = run_live("burgers", 0.0, every=2, live=True, **MICRO)
     assert result.noise_level == 0.0
     assert result.meta["steps"] == 3
+
+
+def test_run_movie_stitches_an_mp4(tmp_path):
+    path = tmp_path / "micro.mp4"
+    result = run_live("burgers", 0.0, every=1, path=path, **MICRO)
+    assert result.noise_level == 0.0
+    assert result.meta["steps"] == 3
+    assert path.exists() and path.stat().st_size > 1024
 
 
 def test_burgers_is_the_first_example_option():

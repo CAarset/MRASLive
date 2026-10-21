@@ -1,16 +1,20 @@
-"""Live webgui panels for one MRAS run.
+"""Live visualization for one MRAS run, in two display modes.
 
-Six side-by-side ``ngsolve.webgui`` canvases in two rows, updated while the
-scheme runs::
+``run_live`` runs one noise level and stitches the frames into an mp4 with
+a fixed frame rate, displayed inline in the notebook (the default).  The
+movie re-renders the six panels with matplotlib and *static* colorbars:
+each range (state, data error, parameter, reconstruction error) is set by
+the extremes over all frames, so colors are comparable across time::
 
     datum z        |  data error u - z  |  ground truth u at final time
     estimate qhat  |  error qhat - q    |  true parameter q
 
-The notebook-facing API is :func:`run_live`: pass an example name (see
-:data:`EXAMPLES`) and a noise level, and it builds a demo-sized problem,
-draws the panels, and assimilates, updating every ``every``-th step.  All
-wiring — the ``on_step`` callback, the panel grid functions, the fixed color
-ranges, the final-truth resolution — lives here.
+``live=True`` keeps the interactive mode: six side-by-side
+``ngsolve.webgui`` canvases in two rows, redrawn while the scheme runs
+(``every``-th step).  The notebook-facing API is :func:`run_live`: pass an
+example name (see :data:`EXAMPLES`) and a noise level.  All wiring — the
+``on_step`` callback, the panel grid functions, the fixed color ranges,
+the final-truth resolution, the ffmpeg stitch — lives here.
 """
 
 import importlib.util
@@ -89,9 +93,14 @@ def _symmetric(gf):
 
 
 class LivePanels:
-    """The six panel grid functions, their scenes, and the step callback."""
+    """The six panel grid functions, their scenes, and the step callback.
 
-    def __init__(self, prob, every=5):
+    ``scenes=False`` skips the webgui canvases (movie mode renders with
+    matplotlib instead); ``record=True`` snapshots every redrawn frame for
+    the movie stitch.
+    """
+
+    def __init__(self, prob, every=5, scenes=True, record=False):
         if every < 1:
             raise ValueError("every must be a positive step count")
         self.prob = prob
@@ -114,6 +123,11 @@ class LivePanels:
         # data() supplies u_true step by step and the panel tracks it, so the
         # last frame is the final-time truth.
         self._final_tracked = not self._resolve_final_u()
+
+        self.frames = [] if record else None
+        self.top, self.bottom = [], []
+        if not scenes:
+            return
 
         if self._final_tracked:
             state_lo = state_hi = err_sym = None
@@ -184,24 +198,173 @@ class LivePanels:
             self.err_q.vec.data -= self.q_true.vec.Copy()
         if self._final_tracked and state.has_truth:
             self.u_final.vec.data = state.u_true.vec.Copy()
+        if self.frames is not None:
+            snap = lambda gf: np.asarray(gf.vec.data).copy()
+            self.frames.append((snap(self.z), snap(self.err_u), snap(self.qhat),
+                                None if self.q_true is None
+                                else snap(self.err_q)))
         for scene in self.top + self.bottom:
             scene.Redraw()
 
 
-def run_live(example, level=0.0, every=5, **kwargs):
-    """Assimilate one noise level with the live six-panel view.
+def _view_space(mesh):
+    """A P1 view space with its matplotlib triangulation and vertex coords.
+
+    Every panel field (P3 state, P0 parameter) is interpolated onto this
+    space, so one Gouraud renderer covers all six panels; the triangulation
+    comes from the P1 element vertices directly, with no mesh plotting.
+    """
+    from matplotlib.tri import Triangulation
+    from ngsolve import H1, x as xcf, y as ycf
+    p1 = H1(mesh, order=1)
+    xc, yc = GridFunction(p1), GridFunction(p1)
+    xc.Set(xcf)
+    yc.Set(ycf)
+    tri = np.array([p1.GetDofNrs(el) for el in mesh.Elements()])
+    triangulation = Triangulation(np.asarray(xc.vec.data),
+                                  np.asarray(yc.vec.data), tri)
+    return GridFunction(p1), triangulation
+
+
+def _to_view(frames, fes, view):
+    """Convert raw dof vectors to P1-view arrays (one shared view buffer)."""
+    gf = GridFunction(fes)
+    out = []
+    for arr in frames:
+        gf.vec.data = np.asarray(arr, dtype=np.float64)
+        view.Set(gf)
+        out.append(np.asarray(view.vec.data).copy())
+    return out
+
+
+def make_movie(panels, path, fps=24.0, max_frames=240):
+    """Stitch the recorded frames into an mp4 and return the path.
+
+    The 2x3 panel grid mirrors the live view (datum z | data error u - z |
+    ground-truth state, then estimate qhat | reconstruction error qhat - q |
+    true parameter q).  No panel chrome: bare Gouraud plots with titles.
+    Each colorbar is static, set by the extremes over all frames of its
+    category — state panels share [min, max], error panels are symmetric
+    about zero, parameter panels share [min, max] — and the playback frame
+    rate is constant, so every frame covers the same amount of model time.
+    """
+    if panels.frames is None:
+        raise ValueError("make_movie needs a LivePanels(record=True)")
+    from matplotlib.animation import FFMpegWriter
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    mesh = panels.prob.mesh
+    view, triangulation = _view_space(mesh)
+    has_q = panels.q_true is not None
+    cols = list(zip(*panels.frames)) if panels.frames else [()] * 4
+    z = _to_view(cols[0], panels.z.space, view)
+    err_u = _to_view(cols[1], panels.err_u.space, view)
+    qhat = _to_view(cols[2], panels.qhat.space, view)
+    err_q = (_to_view(cols[3], panels.qhat.space, view)
+             if has_q and cols[3] else [])
+    u_final = _to_view([panels.u_final.vec.data], panels.u_final.space,
+                       view)[0]
+    q_true = (_to_view([panels.q_true.vec.data], panels.q_true.space, view)[0]
+              if has_q else None)
+
+    def _lo_hi(*series):
+        lo = min(float(np.min(s)) for s in series)
+        hi = max(float(np.max(s)) for s in series)
+        return lo, hi + 1e-12 * (hi - lo + 1e-300)
+
+    def _sym(*series):
+        return 1e-12 + max(float(np.max(np.abs(s))) for s in series)
+
+    state_rng = _lo_hi(z, [u_final])
+    q_rng = _lo_hi(qhat, [q_true]) if has_q else None
+    spec = [
+        ("datum z", z, *state_rng),
+        ("data error u - z", err_u, -_sym(*err_u), _sym(*err_u)),
+        ("ground truth u at final time", [u_final], *state_rng),
+        ("estimate qhat", qhat, *(q_rng or _lo_hi(qhat))),
+        ("reconstruction error qhat - q", err_q,
+         -_sym(*err_q), _sym(*err_q)) if err_q else None,
+        ("true parameter q", [q_true], *(q_rng or (0.0, 1.0))) if has_q else None,
+    ]
+
+    n = max([len(p[1]) for p in spec if p is not None] or [1])
+    stride = -(-n // max_frames)  # ceil
+    keep = list(range(0, n, stride))
+
+    fig = Figure(figsize=(12.0, 5.2), dpi=100)
+    FigureCanvasAgg(fig)
+    fig.subplots_adjust(left=0.05, right=0.95, top=0.89, bottom=0.06,
+                        hspace=0.55, wspace=0.35)
+    axes = fig.subplots(2, 3)
+    mappers = []
+    for ax, panel in zip(axes.ravel(), spec):
+        if panel is None:
+            ax.set_visible(False)
+            continue
+        title, series, lo, hi = panel
+        mesh_plot = ax.tripcolor(triangulation, series[keep[0]],
+                                 shading="gouraud", cmap="viridis",
+                                 vmin=lo, vmax=hi)
+        fig.colorbar(mesh_plot, ax=ax, fraction=0.046, pad=0.03)
+        ax.set_title(title, fontsize=9)
+        ax.set_axis_off()
+        ax.set_aspect("equal", adjustable="datalim")
+        if len(series) > 1:
+            mappers.append((mesh_plot, series))
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    writer = FFMpegWriter(fps=fps, bitrate=2000)
+    with writer.saving(fig, str(path), dpi=100):
+        for k in keep:
+            for mapper, series in mappers:
+                mapper.set_array(series[k])
+            writer.grab_frame()
+    return path
+
+
+def _display_movie(path):
+    """Show the mp4 inline when a notebook front-end is present."""
+    print(f"movie: {path}")
+    try:
+        from IPython.display import Video, display
+    except ImportError:
+        return
+    display(Video(str(path), embed=True, mimetype="video/mp4"))
+
+
+def run_live(example, level=0.0, every=5, live=False, fps=24.0, path=None,
+             **kwargs):
+    """Assimilate one noise level with the six-panel view.
 
     ``example`` is a name from :data:`EXAMPLES` (or an already-built
     ``Problem``); ``level`` is the relative L2 noise of the data
-    (``0.05`` = 5 %).  Returns the :class:`~mras.results.LevelResult`.
+    (``0.05`` = 5 %).  By default the run is stitched into an mp4 with a
+    fixed frame rate (frames every ``every`` steps, static colorbars) and
+    displayed; ``path`` overrides ``results/<name>_level<n>.mp4``.  With
+    ``live=True`` the panels stream live in the notebook instead.  Returns
+    the :class:`~mras.results.LevelResult`.
     """
     prob = example if isinstance(example, Problem) else build(example, **kwargs)
-    panels = LivePanels(prob, every=every)
-    panels.show()
+    if live:
+        panels = LivePanels(prob, every=every)
+        panels.show()
+        prob.on_step = panels.update
+        try:
+            result = prob.run_level(level)
+        finally:
+            prob.on_step = None
+        panels.update(result.state, force=True)
+        return result
+    panels = LivePanels(prob, every=every, scenes=False, record=True)
     prob.on_step = panels.update
     try:
         result = prob.run_level(level)
     finally:
         prob.on_step = None
-    panels.update(result.state, force=True)
+    if path is None:
+        path = Path("results") / f"{prob.name}_level{level:g}.mp4"
+    movie = make_movie(panels, path, fps=fps)
+    _display_movie(movie)
     return result
