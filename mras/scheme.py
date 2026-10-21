@@ -97,7 +97,8 @@ class Problem:
     -----------------------------------------------------
     ``u0``                   initial state (coefficient or grid function).
     ``q_true``               true parameter (coefficient or grid function);
-                             error_q is reported only when it is known.
+                             the tracked error_q = ||qhat-q||/||q|| is
+                             reported only when it is known.
     ``data_domains``         optional finer ``Domains`` for data generation.
     ``incremental``          solve for the increment into ``aux`` and add it to
                              ``gf`` (True) or solve for the new state directly
@@ -265,10 +266,16 @@ class Problem:
         if self.on_step is not None:
             self.on_step(state)
         truth_known = self._truth_known()
+        # The tracked quantity is the parameter reconstruction error, and
+        # the paper's tables report errors relative to the true field
+        # (Section 8): error_q = ||qhat - q||_L2 / ||q||_L2.
+        error_q = None
+        if truth_known and self.q_true is not None:
+            qnorm = l2norm(self.q_true, state.mesh)
+            if qnorm > 0.0:
+                error_q = [l2diff(state.gfq, self.q_true, state.mesh) / qnorm]
         error_u = [l2diff(state.gfu, state.u_true, state.mesh)] \
             if truth_known else None
-        error_q = [l2diff(state.gfq, self.q_true, state.mesh)] \
-            if truth_known and self.q_true is not None else None
         misfit_u = []
         saved_u = [state.gfu.vec.FV().NumPy().copy()]
         saved_q = [state.gfq.vec.FV().NumPy().copy()]
@@ -279,7 +286,8 @@ class Problem:
             self.data(state)
             misfit_u.append(l2diff(state.gfu, state.z, state.mesh))
             if progress:
-                headline = (error_u[-1] if error_u is not None
+                headline = (error_q[-1] if error_q is not None
+                            else error_u[-1] if error_u is not None
                             else misfit_u[-1])
                 print(f"\r{self.name} level={level}: t={state.t.Get():.3f}"
                       f"/{self.tend}  err={headline:.3e}", end="", flush=True)
@@ -296,7 +304,8 @@ class Problem:
                 error_u.append(l2diff(state.gfu, state.u_true, state.mesh))
             state.gfq.Set(state.gf.components[1])
             if error_q is not None and state.has_truth:
-                error_q.append(l2diff(state.gfq, self.q_true, state.mesh))
+                error_q.append(l2diff(state.gfq, self.q_true, state.mesh)
+                               / qnorm)
             if state.counter % self.saved_every == 0:
                 saved_q.append(state.gfq.vec.FV().NumPy().copy())
                 saved_u.append(state.gfu.vec.FV().NumPy().copy())

@@ -33,6 +33,9 @@ def test_burgers_forward_generation_and_tracking():
         # No data and no truth hooks: the driver generated the observations.
         assert res.error_u is not None and res.error_q is not None
         assert res.error_u[0] == 0.0
+        # The parameter starts at the zero initial guess, so its relative
+        # reconstruction error at t=0 is ||0 - q|| / ||q|| = 1 exactly.
+        assert res.error_q[0] == 1.0
         assert np.all(np.isfinite(res.error_u)) and np.all(np.isfinite(res.error_q))
         assert res.error_u[-1] < 0.3  # state tracks within O(dt) of the reference
         assert res.error_q[-1] < 0.95 * res.error_q[0]  # sustained excitation

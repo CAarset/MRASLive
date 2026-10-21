@@ -13,6 +13,7 @@ class LevelResult:
     problem: str
     noise_level: float
     error_u: np.ndarray | None
+    # Relative parameter reconstruction error ||qhat - q||_L2 / ||q||_L2.
     error_q: np.ndarray | None
     saved_gfu: np.ndarray
     saved_gfq: np.ndarray
