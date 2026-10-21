@@ -32,7 +32,7 @@ excitation surrogate.  See docs/DEVIATIONS.md for the full audit.
 import argparse
 from pathlib import Path
 
-from ngsolve import (BilinearForm, IfPos, LinearForm, dx, exp, grad, pi, sin,
+from ngsolve import (BilinearForm, LinearForm, dx, exp, grad, pi, sin, sqrt,
                      x, y)
 
 from mras.config import RunConfig, build, load_yaml
@@ -43,35 +43,45 @@ from mras.scheme import Problem
 LENGTH, HEIGHT = 6.0, 1.2
 HOLE_XS, HOLE_R = (1.5, 3.0, 4.5), 0.18
 Q_WAKE, Q_FREE, Q_RADIUS = 0.15, 1.0, 0.33
+Q_SMOOTH = 0.0875  # wake decay scale, a quarter of the demo cell size
 
 # Recovery of q is driven by the persistent-excitation condition: cells
 # update only where |grad z| > 0.  The excitation is therefore a grid of
-# phase-shifted oscillating heaters filling the pipe, on a multi-bump
-# initial state, so every wake sits inside the sensing region.
+# heaters with distinct oscillation frequencies filling the pipe, on a
+# multi-bump initial state, so every wake sits inside the sensing region.
 U0 = sum(exp(-((x - cx) ** 2 + (y - HEIGHT / 2) ** 2) / 0.25)
          for cx in (LENGTH * (i + 0.5) / 4 for i in range(4))) \
     * y * (HEIGHT - y) * x * (LENGTH - x)
 
 
 def SOURCE(t):
-    """Six heaters on a 3x2 grid, each oscillating with its own phase.
+    """Six heaters on a 3x2 grid, each oscillating with its own frequency.
 
-    The q-update gain scales with the heater amplitude squared; 0.9 keeps
-    the explicit parameter flow contracting for every dt in this example.
+    Distinct periods (1.6 to 2.65) break the rank-1 temporal structure a
+    common frequency would impose.  Amplitude 0.9 bounds the measured
+    ||grad z||_inf at about 12, so the explicit parameter flow gain
+    dt * ||grad z||_inf^2 / (2 lambda_1) — lambda_1 >= 7.1 for this pipe,
+    C = -Laplace — is 0.21 per unit dt: at dt = 0.02 the update runs with
+    a fivefold contraction margin.
     """
     return sum(
-        0.9 * sin(2 * pi * (0.4 * i + 0.7 * j + 0.25) + 2 * pi * t / 2.5)
+        0.9 * sin(2 * pi * (0.4 * i + 0.7 * j + 0.25) + 2 * pi * t
+                  / (1.6 + 0.41 * i + 0.23 * j))
         * exp(-((x - (i + 0.5) * LENGTH / 3) ** 2
                 + (y - (j + 0.5) * HEIGHT / 2) ** 2) / 0.15)
         for i in range(3) for j in range(2))
 
 
 def _wake_field():
-    """q_true: low diffusion in disks around the holes, high elsewhere."""
+    """q_true: low diffusion around the holes, smooth logistic rise to
+    Q_FREE.  The decay scale Q_SMOOTH keeps the target reachable by the
+    P0 space; abrupt disks put a large share of the L2 error into the
+    kink layer alone."""
     cf = Q_FREE
     for cx in HOLE_XS:
-        cf = IfPos((x - cx) ** 2 + (y - HEIGHT / 2) ** 2 - Q_RADIUS ** 2,
-                   cf, Q_WAKE)
+        r = sqrt((x - cx) ** 2 + (y - HEIGHT / 2) ** 2)
+        cf = Q_WAKE + (cf - Q_WAKE) * (1 - 1 / (1 + exp((r - Q_RADIUS)
+                                                        / Q_SMOOTH)))
     return cf
 
 
@@ -84,7 +94,7 @@ class BurgersPipe(Problem):
     symmetric = False  # the q -> u coupling block makes the joint form
     # nonsymmetric (block-triangular, as for Darcy; GMRES is the safe choice)
 
-    def __init__(self, h=0.15, dt=1e-2, tend=5.0, k_u=3, seed=0,
+    def __init__(self, h=0.15, dt=1e-2, tend=10.0, k_u=3, seed=0,
                  series_counters=()):
         super().__init__(burgers_pipe(maxh=h, order_u=k_u), dt=dt, tend=tend,
                          k_u=k_u, seed=seed)
@@ -153,7 +163,7 @@ def main():
     ap.add_argument("--config", help="YAML run configuration (see mras.config)")
     ap.add_argument("--h", type=float, default=0.15)
     ap.add_argument("--dt", type=float, default=1e-2)
-    ap.add_argument("--tend", type=float, default=5.0)
+    ap.add_argument("--tend", type=float, default=10.0)
     ap.add_argument("--levels", type=float, nargs="+", default=[0.0, 0.05])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--quick", action="store_true", help="small sizes, seconds")

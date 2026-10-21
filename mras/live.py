@@ -50,7 +50,7 @@ def _burgers(**kwargs):
 # Each entry: factory plus the demo discretization that keeps a full
 # assimilation live-visualizable at notebook speed.
 EXAMPLES = {
-    "burgers": (_burgers, dict(h=0.35, dt=0.02, tend=5.0)),
+    "burgers": (_burgers, dict(h=0.35, dt=0.02, tend=10.0)),
     "darcy": (DarcyProblem, dict(h=0.08, dt=0.02, tend=2.0,
                                  data_h=0.06, data_order=2)),
     "fisher": (FisherProblem, dict(h=0.1, dt=0.02, tend=3.0)),
