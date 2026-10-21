@@ -1,0 +1,12 @@
+# Burgers pipe sweep for examples/burgers_pipe.py:
+#   .venv/bin/python examples/burgers_pipe.py --config configs/burgers.yaml
+defaults:
+  dt: 0.01
+  tend: 5.0
+  k_u: 3
+  levels: [0.0, 0.05, 0.2]
+  times: [2.0, 5.0]
+
+runs:
+  - {h: 0.15,  seed: 0, out: results/burgers_pipe_h15}
+  - {h: 0.075, seed: 0, out: results/burgers_pipe_h075}

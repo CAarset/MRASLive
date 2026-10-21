@@ -70,3 +70,27 @@ def allen_cahn(maxh=0.1, order_u=3, order_q=0):
     Ufes = H1(mesh, order=order_u)
     Qfes = L2(mesh, order=order_q)
     return Domains(mesh, Ufes, Qfes)
+
+
+def burgers_pipe(maxh=0.15, order_u=3, order_q=0, length=6.0, height=1.2,
+                 hole_xs=(1.5, 3.0, 4.5), hole_r=0.18):
+    """Pipe: rectangle with circular holes, homogeneous Dirichlet everywhere.
+
+    A channel of size ``length x height`` from which disks of radius
+    ``hole_r`` are cut at the given x-coordinates (mid-height).  Boundaries:
+    inlet/outlet at x = 0/length, wall top and bottom, hole on each circle.
+    """
+    import netgen.libngpy._meshing as ngm
+    from netgen.geom2d import CSG2d, Circle, Rectangle
+    Pnt2 = getattr(ngm, "Point<2>")
+    geo = CSG2d()
+    duct = Rectangle(Pnt2(0, 0), Pnt2(length, height),
+                     left="inlet", right="outlet", bottom="wall", top="wall")
+    for cx in hole_xs:
+        duct = duct - Circle(center=Pnt2(cx, height / 2), radius=hole_r,
+                             bc="hole")
+    geo.Add(duct)
+    mesh = Mesh(geo.GenerateMesh(maxh=maxh))
+    Ufes = H1(mesh, order=order_u, dirichlet="inlet|outlet|wall|hole")
+    Qfes = L2(mesh, order=order_q)
+    return Domains(mesh, Ufes, Qfes)
