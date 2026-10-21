@@ -3,8 +3,8 @@
 import time
 
 import numpy as np
-from ngsolve import (BilinearForm, FESpace, GridFunction, LinearForm,
-                     Parameter, Preconditioner, specialcf)
+from ngsolve import (FESpace, GridFunction, Parameter, Preconditioner,
+                     specialcf)
 from ngsolve.solvers import BVP
 
 from .fields import l2norm

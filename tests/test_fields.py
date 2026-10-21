@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from ngsolve import CoefficientFunction, GridFunction
+from ngsolve import CoefficientFunction
 
 from mras.fields import l2norm, real_root, to_gridfunc, to_gridfunc0
 

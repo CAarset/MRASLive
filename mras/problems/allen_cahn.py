@@ -6,7 +6,6 @@ domain partition.  Both the datum offset (``z_min``) and the noise model
 match the paper runs; see docs/PAPER_TARGETS.md for notes.
 """
 
-import numpy as np
 from ngsolve import (BilinearForm, Grad, GridFunction, IfPos, Integrate,
                      LinearForm, sqrt, sin, pi, dx, ds, x as xc, y as yc)
 
