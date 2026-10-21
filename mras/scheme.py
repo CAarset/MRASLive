@@ -105,6 +105,9 @@ class Problem:
     ``stop_margin``          loop runs while ``t < tend - stop_margin*dt``.
     ``counter_start``        first step index of the identification loop.
     ``series_counters``      step indices where solution snapshots are kept.
+    ``on_step``              callback ``on_step(state)``, invoked once after
+                             ``init_level`` and once after every solved step;
+                             used by the live visualization in :mod:`mras.live`.
 
     ``init_level`` sets the starting ``gfu``, ``gfq`` (from ``initial_guess``)
     and the reference ``u_true`` at ``tstart``; the driver records the t=0
@@ -125,6 +128,7 @@ class Problem:
     u0 = None
     q_true = None
     data_domains = None
+    on_step = None
 
     def __init__(self, domains, dt=1e-3, tend=5.0, k_u=3, seed=0):
         self.mesh, self.Ufes, self.Qfes = domains
@@ -258,6 +262,8 @@ class Problem:
         # the initial guess of the direct solve.
         state.gf.components[0].Set(state.gfu)
         state.gf.components[1].Set(state.gfq)
+        if self.on_step is not None:
+            self.on_step(state)
         truth_known = self._truth_known()
         error_u = [l2diff(state.gfu, state.u_true, state.mesh)] \
             if truth_known else None
@@ -301,6 +307,8 @@ class Problem:
             if state.counter in self.series_counters:
                 series_u.append(state.gfu.vec.FV().NumPy().copy())
                 series_q.append(state.gfq.vec.FV().NumPy().copy())
+            if self.on_step is not None:
+                self.on_step(state)
 
         if progress:
             print()

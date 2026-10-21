@@ -18,7 +18,8 @@ own problem.
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -e ".[pdebench,dev]"     # ngsolve, numpy, matplotlib, pydantic, h5py, pytest
+.venv/bin/pip install -e ".[pdebench,notebook,dev]"  # ngsolve, numpy, matplotlib,
+                                                     # pydantic, h5py, anywidget, pytest
 ```
 
 The Darcy benchmark reads one PDEBench file:
@@ -42,6 +43,22 @@ for r in results:
     print(r.noise_level, r.final_error_u, r.final_error_q)
 error_figure(results, prob.dt, fname="errors.png")
 ```
+
+## Live notebook
+
+`mras_live.ipynb` shows one run in six live `ngsolve.webgui` canvases —
+
+```
+datum z  |  data error u - z  |  ground truth u at final time
+estimate qhat  |  error qhat - q  |  true parameter q
+```
+
+The notebook only picks an example (`burgers`, `darcy`, `fisher`,
+`potential`, `allen_cahn`) and a noise level; `mras/live.py` holds all the
+plumbing (demo sizing, panels, the `on_step` callback, throttled redraws).
+It opens with the Burgers pipe at level 0; run it with
+`jupyter lab mras_live.ipynb` (the canvases stream from a CDN, so the
+browser needs internet).
 
 ## Bring your own mesh and weak form
 
@@ -132,15 +149,16 @@ overrides.  Keep `OMP_NUM_THREADS` small if other work is running.
 
 ```
 mras/               package: scheme (MRAS loop + data resolution), config
-                    (YAML/pydantic), domains, fields, noise, stepper,
-                    problems/{darcy,fisher,potential,allen_cahn},
-                    data/pdebench, results, plotting
+                    (YAML/pydantic), domains, fields, noise, stepper, live
+                    (webgui panels), problems/{darcy,fisher,potential,
+                    allen_cahn}, data/pdebench, results, plotting
+mras_live.ipynb     live six-panel notebook (Burgers preset)
 examples/           runnable demos (Burgers pipe template, Helmholtz,
                     decaying Darcy, quickstart)
 configs/            YAML run configurations
 scripts/            reproduction campaigns and figure assembly
-tests/              pytest suite (domains, fields, noise, scheme, config,
-                    plotting)
+tests/              pytest suite (domains, fields, noise, scheme, live,
+                    config, plotting)
 docs/               cleanup plan, paper-target mapping, deviation report
 ```
 

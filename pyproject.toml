@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 pdebench = ["h5py"]
+notebook = ["anywidget"]
 dev = ["pytest"]
 
 [tool.setuptools.packages.find]
