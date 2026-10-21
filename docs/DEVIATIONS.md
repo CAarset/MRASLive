@@ -152,6 +152,97 @@ Open — where the code cannot force conformance:
   whether to accept the heater grid as PE surrogate, switch to per-step
   randomised spatial sources (the Darcy benchmark's own recipe), or change
   the model so that (A2) becomes verifiable — is open and recorded here.
+- Framework verdict (`mras/verify.py`, reproducible with
+  `scripts/checklist.py`): adjoint pairing machine-precise, (A1) exact
+  (`sigma = 0`, `L = 0`), (A2) FAIL — the kernel probe measures a
+  sign-indefinite pairing, the gradient-coupling situation of the
+  paper's Remark 4.2, (A3) UNVERIFIABLE (no `C_scale` claim to check
+  once (A2) fails), persistent excitation OK, reconstruction descending,
+  seeded.  The failure is therefore localised to the one assumption the
+  paper itself does not verify for its gradient-coupled benchmarks: the
+  implementation passes every probe that does not presuppose (A2), and
+  the error plateau sits in the same band as the paper's own Darcy
+  numbers.  This is what "no (A2), no convergence-rate guarantee" looks
+  like in practice; the Arrhenius pair is the same code on the same
+  checklist with the hooks filled in, and recovers.
+
+## Arrhenius reaction pair — `mras/problems/arrhenius.py` (sixth/seventh examples)
+
+`Dt u - Laplace(u) + q(x) r(u) = g` with `r(u) = 1 + u` (linear member,
+the "linearised" twin) and `r(u) = exp(u)` (nonlinear member) on one and
+the same experimental design: three phase-staggered Gaussian heaters as
+`g`, a two-bump smooth `q_true`, zero initial state and estimate.
+Zeroth-order (pointwise) coupling in `q`, so this is the example class
+where the paper's theory is fully verifiable:
+
+- Affine in `q`: `sigma = 0` exactly, `L = 0` exactly, and the tracking
+  kernel `f'_q(q, z)[s] = s r(z)` equals the state-side coupling — the
+  adjoint pairing test measures it at machine precision (~1e-15).
+- (A2): `f(q, z) - f(p, z) = (q - p) r(z)`, so `C_coe` is any a.e. lower
+  bound of `r(z)` over the datum.  `c_coe()` computes it by bisection on
+  the *weak* essential lower bound (`essinf_datum`, the integrated
+  negative part `(r0 - u)^+`), because nodal minima of the P3 datum undershoot the
+  true bound (Gibbs ringing, cf. the noise-model section).  Linear
+  member: witness `1 + lo`; exponential member: `exp(lo)`.
+- (A3): `C = -Laplace` with `C_scale = 1`, `lambda_1 = 0.12500000000069`
+  on the shipped `4 pi` box (CG inverse iteration, mass-normalised;
+  analytic `2 (pi / L)^2`; the `2 pi` box measured exactly `0.5` the same
+  way); with `L = 0` any `M <= lambda_1` is admissible (the pair declares
+  `N_tilde = 1`, the strict inequality `lambda_1 > L^2 / (2 C_coe)` holds
+  with margin `0.125 > 0`).
+- Measured recovery (level 0, `h = 0.3, dt = 0.02, data_h = 0.15`):
+  relative `q`-error 0.37 (t = 4), 0.13 (t = 8), 0.081 (t = 28) for both
+  members, tail decay ~1%/time-unit.  Both members therefore sit inside
+  the "good" band (< 10%) at long horizon; "excellent" (< 5%) is not
+  reached inside the tested horizon and we do not claim it.
+- The plateau is rate-limited, not a floor: `dt` refinement leaves it
+  unchanged, `h` refinement of `Q_h` moves the P0 representation floor of
+  `q_true` from 0.85% (h = 0.3) to 0.00% (h = 0.15) while the error
+  stays at its plateau, and the long-horizon curve keeps decaying at
+  ~1%/time-unit.  The decay rate of the zero-order flow scales like
+  `r^2 / lambda_1(C)` - confirmed by the two design levers: datum
+  amplitude (`r`, error at t = 10: 0.23 / 0.17 / 0.12 for amplitude 1 /
+  1.5 / 3) and domain size (`lambda_1 ~ L^-2`).  The shipped
+  configuration bakes the `4 pi` box and the triple heater amplitude
+  into the module defaults (`SIZE = 4 pi`, `PREHEAT = 0.9`, heaters
+  3.6 / 3.0 / 2.4, widened Gaussians, `h = 0.3, dt = 0.02, tend = 10,
+  data_h = 0.15`).
+
+## Automated theory checklist — `mras/verify.py`
+
+Every example — past or future — through the same fixed questions:
+adjoint pairing, (A1)/sigma, (A2) monotonicity, (A3) coercivity margin,
+persistent excitation of the datum, reconstruction descent, seeded
+reproducibility.  Statuses are `ok` / `fail` / `deviation` (documented,
+via `adjoint_deviation`) / `unverifiable` (no probe exists — flagged,
+never silently skipped).  The probes and their honest caveats:
+
+- Theory hooks are plain attributes defaulting to `None` on `Problem`
+  (`coupling_kernel`, `monotone_pair`, `C_scale`, `adjoint_deviation`,
+  `c_coe`); the checks dispatch on callability, so a problem that never
+  declares a hook is reported unverifiable rather than crashing.
+- The (A2) pair probe localises test pairs on <= 3 cells: full-domain
+  random pairs only measure the datum-weighted *mean* of the
+  monotonicity density and average out sign-changing data.  Related
+  lesson: Allen-Cahn's nodal datum values ring below zero at sine
+  extrema (63% negative!) while its cell means stay >= 1 - |u_wot| > 0;
+  `tests/test_verify.py` pins both facts so the verdict cannot silently
+  flip through an interpolation artifact.
+- For affine problems `c_coe()` (analytic witness) outranks the discrete
+  probe: weakly interpolating a P0 direction into the P3 datum
+  under-reports the witness (0.166 vs the true ~1).
+- Gradient couplings (Darcy, Fisher, Burgers) are exactly degenerate on
+  P0 (`grad q = 0` a.e.); the probe's H1-relaxed lift is sign-indefinite
+  and reported `fail` with the Remark 4.2 note — the paper itself does
+  not claim (A2) there, and (A3) is then `unverifiable`, not `fail`.
+- `lambda_1(C)` is computed by CG inverse iteration
+  (`solvers.CG(a.mat, rhs, pre=..., sol=...)`, mass-normalised each
+  step); plain `BVP` inner solves under-resolve the low modes and
+  over-report `lambda_1` by ~30x on the coarse box.
+
+`scripts/checklist.py` runs the registry and writes
+`results/checklist.md`; `tests/test_verify.py` pins the documented
+verdict per example.
 
 ## Known theoretical limits (expected behaviour)
 
@@ -182,15 +273,25 @@ Open — where the code cannot force conformance:
   coefficient functions must go through `GridFunction.Set` directly.
 - `ImplicitStepper` needs `a.Assemble()` before construction (its matrix
   is merged in the constructor).
+- ngsolve 6.2.2608: `BilinearForm` has no `matvec` — use `a.mat.matvec`;
+  `solvers.CG(mat, rhs, pre=, sol=, tol=, maxsteps=)` is positional
+  `(mat, rhs)`; `vec.data = <numpy>` demands float64 (the seeded noise
+  snapshots are float32 — cast before assignment); there is no
+  `CoM`/cell-center accessor on `Mesh` (localised P0 probes must work
+  topologically, on cells, not on centres).
 
 ## Verification anchors
 
-- `pytest tests/` (55 tests) covers the fixed-point bookkeeping (t = 0
-  error seeding for all four problems, seeded reproducibility, fresh-start
+- `pytest tests/` (79 tests) covers the fixed-point bookkeeping (t = 0
+  error seeding for all problems, seeded reproducibility, fresh-start
   independence), the noise whitening (covariance moments, exact relative
   level), degree-of-freedom anchors, the field helpers, the Burgers
-  conformance form, and the live helper (hook throttling, relative-error
-  seeding, the fixed-framerate movie stitch).
+  conformance form, the live helper (hook throttling, relative-error
+  seeding, the fixed-framerate movie stitch), the adjoint pairing test
+  (machine precision for the exact-coupling examples, documented ratios
+  for the paper-literal linearisations), the per-example theory
+  checklist verdicts, and the Arrhenius pair (recovery, (A2) witnesses,
+  linearisation limit).
 - `scripts/reproduce.py --micro` and `scripts/darcy_reproduce.py --micro`
   are seconds-long wiring checks for every problem; full campaigns are the
   operator-run handoff scripts.

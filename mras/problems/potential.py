@@ -131,6 +131,16 @@ class PotentialProblem(Problem):
         core = Z_MAX / Z_MIN * l2norm(gfq, self.mesh) ** (2 / 3) + self._c_offset
         return 2 + core ** 2
 
+    adjoint_deviation = ("paper-literal c~ = 0 linearisation of the discrete "
+                         "multiplier, DEVIATIONS.md")
+
+    def monotone_pair(self, qa, qb, z):
+        """[f(qa, z) - f(qb, z)] (qa - qb) for f(q, z) = phi(q) z,
+        phi(q) = q + 3/5 q |q|^{2/3} (phi' = 1 + |q|^{2/3} >= 1)."""
+        def phi(q):
+            return q + 0.6 * q * sqrt(q * q) ** (2 / 3)
+        return (phi(qa) - phi(qb)) * (qa - qb) * z
+
     def forms(self, state):
         dt, sigma = self.dt, self.sigma
         gfq, z, z_old, zt, ut = state.gfq, state.z, state.z_old, state.zt, state.ut

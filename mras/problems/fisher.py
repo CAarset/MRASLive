@@ -95,6 +95,16 @@ class FisherProblem(Problem):
         state.g = GridFunction(self.Ufes)
         state.g.Set(self._g(state.t.Get()))
 
+    # f(q, z) = -div(q grad z) + (reaction evaluated at z) is affine in q:
+    # sigma = 0 and L = 0 exactly; (A2) shares the Darcy situation (P0
+    # parameter space, sign-indefinite smoothed pairing) -- mras/verify.py.
+    sigma = 0.0
+    L = 0.0
+    C_scale = 1.0
+
+    def coupling_kernel(self, z, v):
+        return Grad(z) * Grad(v)
+
     def forms(self, state):
         dt = self.dt
         a = BilinearForm(self.X)

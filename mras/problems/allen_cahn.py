@@ -79,6 +79,20 @@ class AllenCahnProblem(Problem):
         core = (l2norm(gfq, self.mesh) ** (2 / 3) + self._c_base)
         return 1 + 2 * (Z_MAX ** 2 / Z_MIN) * core ** 2
 
+    adjoint_deviation = ("paper-literal c~ = 0 linearisation of the discrete "
+                         "multiplier, DEVIATIONS.md")
+
+    def monotone_pair(self, qa, qb, z):
+        """[f(qa, z) - f(qb, z)] (qa - qb) for f(q, z) = q z^3 +
+        3/5 q |q|^{2/3} z: monotone wherever z >= 0.  The datum u^dagger =
+        u_wot (DECAY_T - t) / DECAY_T + OFFSET has a positive a.e. lower
+        bound (its nodal P3 values ring below zero at sine extrema, but the
+        cell means stay >= 1 - |u_wot| > 0), so (A2) holds on the actual
+        space-time range and the witness is a lower bound on the datum."""
+        def phi(q):
+            return q * z ** 3 + 0.6 * q * sqrt(q * q) ** (2 / 3) * z
+        return (phi(qa) - phi(qb)) * (qa - qb)
+
     def forms(self, state):
         dt, sigma = self.dt, self.sigma
         gfq, z, z_old, zt, ut = state.gfq, state.z, state.z_old, state.zt, state.ut

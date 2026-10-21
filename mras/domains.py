@@ -20,9 +20,10 @@ def _occ_rectangle(bcs, maxh, order_u, corners=((0, 0), (1, 1))):
     return mesh
 
 
-def darcy(maxh=0.04, order_u=3, order_q=0):
-    """Unit square, homogeneous Dirichlet on U_h; Q_h is unconstrained."""
-    mesh = _occ_rectangle(("left", "right", "bottom", "top"), maxh, order_u)
+def darcy(maxh=0.04, order_u=3, order_q=0, size=1.0):
+    """Square [0, size]^2, homogeneous Dirichlet on U_h; Q_h is unconstrained."""
+    mesh = _occ_rectangle(("left", "right", "bottom", "top"), maxh, order_u,
+                          corners=((0, 0), (size, size)))
     Ufes = H1(mesh, order=order_u, dirichlet="top|bottom|left|right")
     Qfes = L2(mesh, order=order_q)
     return Domains(mesh, Ufes, Qfes)

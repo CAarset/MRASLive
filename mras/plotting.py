@@ -11,30 +11,46 @@ from netgen.libngpy._meshing import NgException
 __all__ = ["sample_field", "draw_field", "evolution_figure", "error_figure"]
 
 
-def sample_field(gf, box, n=128):
-    """Evaluate a grid function on an n x n grid over ``box`` -> (x, y, Z).
+def sample_field(gf, box, n=128, mesh=None):
+    """Evaluate a field on an n x n grid over ``box`` -> (x, y, Z).
 
-    Grid points outside the mesh (e.g. the corners around a disk) are NaN,
-    which imshow renders transparent.
+    Accepts a GridFunction or any CoefficientFunction built from one.
+    Grid points outside the mesh (e.g. the corners around a disk) are NaN
+    where point evaluation fails, which imshow renders transparent; note
+    that a CoefficientFunction expression evaluates analytically outside
+    the mesh instead of failing, so pass it only over a box-shaped mesh.
+    A pure CoefficientFunction (no grid function at all) exposes no mesh
+    attribute, so pass ``mesh`` for it.
     """
     lo, hi = box
     xs = np.linspace(lo[0], hi[0], n)
     ys = np.linspace(lo[1], hi[1], n)
+    points_on = getattr(gf, "mesh", mesh)
 
     def at(x, y):
         try:
-            return gf(float(x), float(y))
+            # a plain grid function returns a float here; an expression
+            # with a CoefficientFunction (e.g. an analytic q_true) returns
+            # a point-evaluation functional instead, which the MeshPoint
+            # overload below evaluates
+            return float(gf(float(x), float(y)))
         except NgException:
             return np.nan
+        except TypeError:
+            if points_on is None:
+                raise TypeError(
+                    "sample_field: this field needs a mesh for point "
+                    "evaluation, pass mesh=...") from None
+            return float(gf(points_on(float(x), float(y))))
 
     Z = np.array([[at(x, y) for x in xs] for y in ys])
     return xs, ys, Z
 
 
 def draw_field(ax, gf, box, n=128, cmap="viridis", vmin=None, vmax=None,
-               title=None, colorbar=True):
+               title=None, colorbar=True, mesh=None):
     """Draw one field into ``ax`` and return the mappable."""
-    xs, ys, Z = sample_field(gf, box, n)
+    xs, ys, Z = sample_field(gf, box, n, mesh=mesh)
     im = ax.imshow(Z, origin="lower", extent=[xs[0], xs[-1], ys[0], ys[-1]],
                    cmap=cmap, vmin=vmin, vmax=vmax, aspect="auto")
     if title:
@@ -47,7 +63,8 @@ def draw_field(ax, gf, box, n=128, cmap="viridis", vmin=None, vmax=None,
 
 
 def evolution_figure(rows, box, col_labels=None, row_labels=None,
-                     fname=None, n=128, cmap="viridis", figsize_per=(3.2, 2.6)):
+                     fname=None, n=128, cmap="viridis",
+                     figsize_per=(3.2, 2.6), mesh=None):
     """One panel per field; ``rows`` is a list of lists of grid functions.
 
     Colours are normalised per row, matching the parameter/state panel
@@ -59,7 +76,8 @@ def evolution_figure(rows, box, col_labels=None, row_labels=None,
                                       figsize_per[1] * nrows),
                              squeeze=False)
     for i, row in enumerate(rows):
-        vals = [np.asarray(sample_field(gf, box, 32)[2]) for gf in row]
+        vals = [np.asarray(sample_field(gf, box, 32, mesh=mesh)[2])
+                for gf in row]
         vmin = min(np.nanmin(v) for v in vals)
         vmax = max(np.nanmax(v) for v in vals)
         for j, gf in enumerate(row):
@@ -72,7 +90,7 @@ def evolution_figure(rows, box, col_labels=None, row_labels=None,
                 label = row_labels[i]
             draw_field(axes[i][j], gf, box, n=n, cmap=cmap,
                        vmin=vmin, vmax=vmax, title=label,
-                       colorbar=(j == ncols - 1))
+                       colorbar=(j == ncols - 1), mesh=mesh)
         for j in range(len(row), ncols):
             axes[i][j].axis("off")
     fig.tight_layout()

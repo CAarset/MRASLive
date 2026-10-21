@@ -27,7 +27,12 @@ class HelmholtzProblem(Problem):
 
     name = "helmholtz"
     sigma = 0.0
-    L = 5.0
+    L = 5.0  # diffusion coefficient: C = L * (-Laplace); no q in the truth,
+    # so the (A1)/(A2)/(A3) ladder is vacuous and the q-update is the
+    # paper's quadratic self-step (mras/verify.py flags this unverifiable)
+    C_scale = 5.0
+    adjoint_deviation = ("parameter absent from the truth model: no adjoint "
+                         "pair exists by construction (quadratic self-step)")
 
     def __init__(self, h=0.08, tend=1.5, tsteps=1000, k_u=3, seed=0):
         super().__init__(darcy(maxh=h, order_u=k_u, order_q=0),

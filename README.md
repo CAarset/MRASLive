@@ -9,10 +9,13 @@ Reference implementation of the numerical scheme in
 
 The estimator evolves the state `u` and the unknown parameter `q` jointly on
 a product finite-element space, driven only by noisy scalar-field data `z` of
-`u`.  Four benchmarks from the paper are included (Darcy flow on PDEBench
-data, Fisher–KPP, a nonlinear-in-state potential problem, Allen–Cahn), plus
-a time-dependent Burgers flow in a perforated pipe as the template for your
-own problem.
+`u`.  Benchmarks: the four from the paper (Darcy flow on PDEBench data,
+Fisher–KPP, a nonlinear-in-state potential problem, Allen–Cahn); a time-
+dependent Burgers flow in a perforated pipe as the template for your own
+problem; and an Arrhenius reaction pair — `Dt u − Δu + q(x) r(u) = g` with
+`r(u) = 1 + u` and `r(u) = e^u` as linearised/nonlinear twins of one
+experiment — built so every assumption of the paper's convergence theory is
+numerically verifiable (see the checklist below).
 
 ## Installation
 
@@ -61,7 +64,8 @@ chrome, so colours are comparable across every frame.  Pass `live=True`
 to stream the same six panels interactively in `ngsolve.webgui` canvases
 instead (those stream from a CDN, so the browser needs internet).  The
 notebook only picks an example (`burgers`, `darcy`, `fisher`,
-`potential`, `allen_cahn`) and a noise level; `mras/live.py` holds all
+`potential`, `allen_cahn`, `arrhenius`, `arrhenius_linear`) and a noise
+level; `mras/live.py` holds all
 the plumbing (demo sizing, frame recording, static ranges, the ffmpeg
 stitch).  Run it with `jupyter lab notebooks/mras_live.ipynb`.
 
@@ -114,6 +118,25 @@ flow needs:
 (INCREMENTAL) variant; `examples/darcy_decaying.py` the lower-level
 `ImplicitStepper` API.
 
+## Verification checklist
+
+Every example — past or future — runs through the same fixed questions
+(`mras/verify.py`): adjoint pairing (`<Ax, y> = <x, A*y>` to numerical
+precision), the (A1) Lipschitz remainder and the `sigma` it forces, the
+(A2) monotonicity witness `C_coe`, the (A3) coercivity margin
+`lambda_1(C) > L^2/(2 C_coe)`, persistent excitation of the datum,
+reconstruction descent, seeded reproducibility.  Verdicts are `ok`,
+`fail` (the honest negative), `deviation` (documented), or
+`unverifiable` (flagged, never silently skipped):
+
+```bash
+.venv/bin/python scripts/checklist.py       # writes results/checklist.md
+.venv/bin/python scripts/demo_arrhenius.py  # q-reconstruction figure, both pair members
+```
+
+`tests/test_verify.py` pins the documented verdict per example, so a
+silent flip of any rung fails the suite.
+
 ## Run configurations (YAML)
 
 Runs are described by `mras.config.RunConfig` (pydantic-validated) and load
@@ -155,15 +178,17 @@ overrides.  Keep `OMP_NUM_THREADS` small if other work is running.
 ```
 mras/               package: scheme (MRAS loop + data resolution), config
                     (YAML/pydantic), domains, fields, noise, stepper, live
-                    (webgui panels), problems/{darcy,fisher,potential,
-                    allen_cahn}, data/pdebench, results, plotting
+                    (webgui panels), verify (theory checklist),
+                    problems/{darcy,fisher,potential,allen_cahn,arrhenius},
+                    data/pdebench, results, plotting
 mras_live.ipynb     live six-panel notebook (Burgers preset)
 examples/           runnable demos (Burgers pipe template, Helmholtz,
                     decaying Darcy, quickstart)
 configs/            YAML run configurations
-scripts/            reproduction campaigns and figure assembly
+scripts/            reproduction campaigns, figure assembly, the theory
+                    checklist, the Arrhenius reconstruction demo
 tests/              pytest suite (domains, fields, noise, scheme, live,
-                    config, plotting)
+                    config, plotting, adjoint, arrhenius, verify)
 docs/               cleanup plan, paper-target mapping, deviation report
 ```
 

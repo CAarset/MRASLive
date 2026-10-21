@@ -24,7 +24,9 @@ import numpy as np
 from ngsolve import GridFunction
 from ngsolve.webgui import Draw
 
-from .problems import AllenCahnProblem, DarcyProblem, FisherProblem, PotentialProblem
+from .problems import (AllenCahnProblem, ArrheniusLinearProblem,
+                       ArrheniusProblem, DarcyProblem, FisherProblem,
+                       PotentialProblem)
 from .scheme import Problem, State
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
@@ -56,6 +58,10 @@ EXAMPLES = {
     "fisher": (FisherProblem, dict(h=0.1, dt=0.02, tend=3.0)),
     "potential": (PotentialProblem, dict(h=0.12, dt=0.02, tend=3.0)),
     "allen_cahn": (AllenCahnProblem, dict(h=0.12, dt=0.02, tend=3.0)),
+    "arrhenius": (ArrheniusProblem,
+                  dict(h=0.3, dt=0.02, tend=10.0, data_h=0.15)),
+    "arrhenius_linear": (ArrheniusLinearProblem,
+                         dict(h=0.3, dt=0.02, tend=10.0, data_h=0.15)),
 }
 
 

@@ -90,9 +90,16 @@ class BurgersPipe(Problem):
 
     name = "burgers_pipe"
     box = ((0.0, 0.0), (LENGTH, HEIGHT))
+    # f(q, z) = -div(q grad z) + (z grad z) is affine in q: sigma = 0 and
+    # L = 0 exactly; (A2) shares the Darcy situation -- mras/verify.py.
     sigma = 0.0
+    L = 0.0
+    C_scale = 1.0
     symmetric = False  # the q -> u coupling block makes the joint form
     # nonsymmetric (block-triangular, as for Darcy; GMRES is the safe choice)
+
+    def coupling_kernel(self, z, v):
+        return grad(z) * grad(v)
 
     def __init__(self, h=0.15, dt=1e-2, tend=10.0, k_u=3, seed=0,
                  series_counters=()):

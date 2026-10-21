@@ -99,6 +99,17 @@ class DarcyProblem(Problem):
         state.g = to_gridfunc(self.sources[counter - 1], self.Ufes)
         state.set_z(self.noise.draw(state.u_true, state.level, counter))
 
+    # f(q, z) = -div(q grad z) is affine in q: sigma = 0 and L = 0 exactly.
+    # (A2) holds only formally: the pairing int q grad(z) grad(q) with q in
+    # the P0 parameter space is 0 a.e., and its smoothed relaxation
+    # -1/2 int q^2 Laplace z is sign-indefinite -- see mras/verify.py.
+    sigma = 0.0
+    L = 0.0
+    C_scale = 1.0
+
+    def coupling_kernel(self, z, v):
+        return Grad(z) * Grad(v)
+
     def forms(self, state):
         dt = self.dt
         a = BilinearForm(self.X)

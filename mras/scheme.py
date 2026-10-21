@@ -173,6 +173,26 @@ class Problem:
     def forward_forms(self, step):
         """Weak form of one data-generation step; see ``DataStep``."""
 
+    # -- theory-verification hooks (mras/verify.py checklist) -------------
+    C_scale = None
+    """Tracking operator as a multiple of minus the Laplacian, C = C_scale *
+    (-Laplace), or None when C is more complicated (e.g. norm-dependent)."""
+
+    adjoint_deviation = None
+    """One-line reason why the cross-block adjoint pairing is expected not
+    to vanish, for problems that reproduce a paper-literal discretisation
+    instead of the abstract pairing; None means machine precision expected."""
+
+    coupling_kernel = None
+    """Callable c(z, v) with <f(q, z), v> = int q * c(z, v) dx, declared by
+    problems whose f is affine in q; the (A2) pairing is then int q^2-style
+    degenerate testing.  None (not declared) when f is not affine in q."""
+
+    monotone_pair = None
+    """Callable (qa, qb, z) -> integrand [f(qa, z) - f(qb, z)] * (qa - qb)
+    for pointwise nonlinear f, declared by problems with f nonlinear in q.
+    None (not declared) for affine couplings or absent parameters."""
+
     def data(self, state):
         """Feed one step: resolve data, refresh u_true, g, and z."""
         source = self.source(state.t)
