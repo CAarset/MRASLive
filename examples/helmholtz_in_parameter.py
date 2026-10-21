@@ -15,7 +15,6 @@ from ngsolve import BilinearForm, GridFunction, LinearForm, Parameter
 from ngsolve import dx, exp, grad, x, y
 
 from mras.domains import darcy
-from mras.noise import GaussianFEMNoise
 from mras.plotting import error_figure, evolution_figure
 from mras.scheme import Problem
 from mras.stepper import ImplicitStepper
@@ -33,7 +32,6 @@ class HelmholtzProblem(Problem):
     def __init__(self, h=0.08, tend=1.5, tsteps=1000, k_u=3, seed=0):
         super().__init__(darcy(maxh=h, order_u=k_u, order_q=0),
                          dt=tend / tsteps, tend=tend, k_u=k_u, seed=seed)
-        self.noise = GaussianFEMNoise(self.Ufes, seed=self.seed)
         self.q_true = 0.0  # the ground-truth parameter is identically zero
         self.tpar = Parameter(0.0)
         self.coef_0, self.u_exact = self._make_data(h)
@@ -64,9 +62,8 @@ class HelmholtzProblem(Problem):
         state.u_true.Set(self.coef_0)  # exact state at t = 0
         state.gfq.Set(0.0)
 
-    def data(self, state):
-        state.u_true.Set(self.u_exact[state.counter - 1])
-        state.set_z(self.noise.draw(state.u_true, state.level, state.counter))
+    def truth(self, state):
+        return self.u_exact[state.counter - 1]
 
     def forms(self, state):
         z, z_old, gfu, gfq = state.z, state.z_old, state.gfu, state.gfq

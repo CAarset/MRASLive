@@ -9,15 +9,16 @@ Reference implementation of the numerical scheme in
 
 The estimator evolves the state `u` and the unknown parameter `q` jointly on
 a product finite-element space, driven only by noisy scalar-field data `z` of
-`u`.  Four benchmarks are included: a Darcy flow driven by PDEBench data, a
-Fisher–KPP equation, a nonlinear-in-state potential problem, and an
-Allen–Cahn equation.
+`u`.  Four benchmarks from the paper are included (Darcy flow on PDEBench
+data, Fisher–KPP, a nonlinear-in-state potential problem, Allen–Cahn), plus
+a time-dependent Burgers flow in a perforated pipe as the template for your
+own problem.
 
 ## Installation
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -e ".[pdebench,dev]"     # ngsolve, numpy, matplotlib, h5py, pytest
+.venv/bin/pip install -e ".[pdebench,dev]"     # ngsolve, numpy, matplotlib, pydantic, h5py, pytest
 ```
 
 The Darcy benchmark reads one PDEBench file:
@@ -45,8 +46,8 @@ error_figure(results, prob.dt, fname="errors.png")
 ## Bring your own mesh and weak form
 
 A problem is a `mras.Problem` subclass on `(U_h, Q_h) = P3 x P0` over any
-NGSolve mesh.  Two hooks are required — the data feed and the joint
-bilinear/linear forms of one time step:
+NGSolve mesh.  One hook is mandatory — the joint bilinear/linear forms of a
+single MRAS step:
 
 ```python
 from mras.scheme import Problem
@@ -54,20 +55,60 @@ from mras.scheme import Problem
 class MyProblem(Problem):
     name = "my_problem"
 
-    def data(self, state):                    # set the datum and the reference
-        state.u_true.Set(exact_at(state.counter))
-        state.set_z(noisy_copy_of(state.u_true))
-
     def forms(self, state):                   # one MRAS step as a joint BVP
         a, res = BilinearForm(self.X), LinearForm(self.X)
         a += self.u * self.v * dx + self.q * self.s * dx
-        # ... model terms and the q-gradient term from the paper ...
+        # ... model terms and the datum-gradient q term from the paper ...
         return a, res
 ```
 
-`examples/helmholtz_in_parameter.py` is a complete, runnable version of this
-pattern (nonlinear-in-parameter Helmholtz); `examples/darcy_decaying.py`
-shows the lower-level `ImplicitStepper` API.
+Data are then resolved by whichever hook you provide, in this order:
+
+* `observations(state)` — you have measurements: hand them over as a
+  `GridFunction`.  State misfit `‖u − z‖` is always reported; comparing to a
+  truth additionally requires the next hook.
+* `truth(state)` — synthetic data: observations are the truth plus seeded
+  FEM Gaussian noise at the requested level, and `error_u`, `error_q` become
+  available.
+* `forward_forms(step)` — no data at all: the driver steps *your forward
+  weak form* (backward Euler) on a finer mesh (`data_domains`) to generate
+  the observations itself, with `source(t)` and `u0` as inputs.
+
+`q_true` and `initial_guess()` set the parameter field and the estimator's
+start; `symmetric = False` routes the (nonsymmetric) joint solve through
+GMRES instead of `BVP` + local smoothing.
+
+`examples/burgers_pipe.py` is the complete worked template: a 2D
+time-dependent Burgers equation on a pipe with interior holes (CSG2d), no
+data files, forward and estimator weak forms side by side, a heater-grid
+source supplying the persistent excitation (`|grad z| > 0`) the parameter
+flow needs:
+
+```bash
+.venv/bin/python examples/burgers_pipe.py --quick
+```
+
+`examples/helmholtz_in_parameter.py` shows the nonlinear-in-parameter
+(INCREMENTAL) variant; `examples/darcy_decaying.py` the lower-level
+`ImplicitStepper` API.
+
+## Run configurations (YAML)
+
+Runs are described by `mras.config.RunConfig` (pydantic-validated) and load
+from YAML: one mapping, a sequence, a `{defaults, runs}` merge, or multiple
+documents.  `configs/burgers.yaml` is the reference:
+
+```yaml
+defaults: {dt: 0.01, tend: 5.0, k_u: 3, levels: [0.0, 0.05, 0.2],
+           times: [2.0, 5.0]}
+runs:
+  - {h: 0.15}
+  - {h: 0.075}
+```
+
+```bash
+.venv/bin/python examples/burgers_pipe.py --config configs/burgers.yaml
+```
 
 ## Running the studies (Tables 6–8, Figs 4–12)
 
@@ -90,12 +131,16 @@ overrides.  Keep `OMP_NUM_THREADS` small if other work is running.
 ## Repository layout
 
 ```
-mras/               package: scheme (MRAS loop), domains, fields, noise,
-                    stepper, problems/{darcy,fisher,potential,allen_cahn},
+mras/               package: scheme (MRAS loop + data resolution), config
+                    (YAML/pydantic), domains, fields, noise, stepper,
+                    problems/{darcy,fisher,potential,allen_cahn},
                     data/pdebench, results, plotting
-examples/           runnable demos (quickstart, Helmholtz, decaying Darcy)
+examples/           runnable demos (Burgers pipe template, Helmholtz,
+                    decaying Darcy, quickstart)
+configs/            YAML run configurations
 scripts/            reproduction campaigns and figure assembly
-tests/              pytest suite (domains, fields, noise, scheme, plotting)
+tests/              pytest suite (domains, fields, noise, scheme, config,
+                    plotting)
 docs/               cleanup plan, paper-target mapping, deviation report
 ```
 
