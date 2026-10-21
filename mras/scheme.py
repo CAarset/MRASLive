@@ -236,10 +236,17 @@ class Problem:
         return self._snaps
 
     # -- driver ---------------------------------------------------------
+    symmetric = True  # False: nonsymmetric weak form, solved by restarted GMRES
+
     def solve(self, a, res, target):
         pre = Preconditioner(a, "local")
         pre.Update()
-        BVP(bf=a, lf=res, gf=target, pre=pre, print=False)
+        if self.symmetric:
+            BVP(bf=a, lf=res, gf=target, pre=pre, print=False)
+        else:
+            from ngsolve.solvers import GMRES
+            GMRES(A=a.mat, b=res.vec, pre=pre, x=target.vec,
+                  maxsteps=1000, tol=1e-12, printrates=False)
 
     def run_level(self, level, progress=True):
         from .results import LevelResult
