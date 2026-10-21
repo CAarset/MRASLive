@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<records>
+			<record>
+		    <language>en</language>
+		    <publisher>AMMC</publisher>
+		    <journalTitle>Applied Mathematics for Modern Challenges</journalTitle>
+		    <issn></issn>
+		    <publicationDate>2026-5-30</publicationDate>
+		    <volume>8</volume>
+		    <issue>0</issue>
+		    <startPage>80</startPage>
+		    <endPage>112</endPage>
+		    <doi>10.3934/ammc.2026005</doi>
+		    <documentType>article</documentType>
+		    <title>
+		    	
+		    </title>
+		    <title language="eng">
+		    	Data assimilation via model reference adaptation for linear and nonlinear dynamical systems
+		    </title>
+		    <authors>
+		      		      <author>
+		      			        		        <name language="eng">Benedikt Kaltenbach</name>
+		        		        		        <email>b.kaltenbach02@stud.uni-goettingen.de</email>
+		        		        		      </author>
+		      		      <author>
+		      			        		        <name language="eng">Christian Aarset</name>
+		        		        		        <email>christian.AARSET@univ-amu.fr</email>
+		        		        		      </author>
+		      		      <author>
+		      			        		        <name language="eng">Tram Thi Ngoc Nguyen</name>
+		        		        		        <email>ttn35@cam.ac.uk</email>
+		        		        		      </author>
+		      		    </authors>
+		    		    <affiliationsList>
+		    			    			    			    			    			    			    			    			    			    			    </affiliationsList>
+		    		    <abstract>
+		    	
+		    </abstract>
+		    <abstract language="eng">
+		    	<p>We address data assimilation for linear and nonlinear dynamical systems via the so-called <i>model reference adaptive system</i>. Continuing our theoretical developments in [<span class="xref"><a href="#b25" ref-type="bibr">25</a></span>], we deliver the first practical implementation of this approach for online parameter identification with time series data. Our semi-implicit scheme couples a modified state equation with a parameter evolution law that is driven by model-data residuals. We demonstrate four benchmark problems of increasing complexity: The Darcy flow, the Fisher-KPP equation, a nonlinear potential equation, and, finally, an Allen–Cahn-type equation. Across all cases, explicit model reference adaptive system construction, verified assumptions, and numerically stable reconstructions underline our proposed method as a reliable, versatile tool for data assimilation and real-time inversion.</p>
+		    </abstract>
+		    <fullTextUrl format="html">/article/id/6a437b684b4042019b12d25e</fullTextUrl>
+		    <keywords>
+		    				      <keyword></keyword>
+			    			      <keyword></keyword>
+			    			      <keyword></keyword>
+			    			      <keyword></keyword>
+			    			      <keyword></keyword>
+			    			      <keyword></keyword>
+			    		    </keywords>
+		    <keywords language="eng">
+		      			      <keyword>Data assimilation</keyword>
+			    			      <keyword>real-time inversion</keyword>
+			    			      <keyword>online parameter identification</keyword>
+			    			      <keyword>model reference adaptive system</keyword>
+			    			      <keyword>nonlinear parabolic PDEs</keyword>
+			    			      <keyword>dynamical systems</keyword>
+			    		    </keywords>
+		  </record>
+	</records>
+

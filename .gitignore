@@ -1,0 +1,19 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Large data: PDEBench files, saved trajectories, meshes, fonts-free caches.
+# Regenerate with the download scripts (checksums in data/pdebench_data_urls.csv).
+*.hdf5
+*.npy
+*.vol
+
+# Paper PDF (22 MB) is published via DOI; keep the XML citation only.
+MRAS_Paper.pdf
+
+# Simulation output
+results/
+data/
+campaign_state/
