@@ -13,11 +13,17 @@ Model (scalar Burgers with unknown diffusion field q, advection in x):
 
 The pipe is a rectangle with circular holes (CSG2d); the true parameter is
 low diffusion around the holes, high elsewhere, so recovery is visible as
-three wakes.  The datum z enters the estimator as in the paper's continuous
-scheme (sigma = 0: the model is linear in q); the nonsymmetric joint
-form runs on GMRES (``symmetric = False``).  The parameter flow gains only
-where |grad z| > 0 (persistent excitation), so a grid of oscillating
-heaters keeps the whole pipe in the sensing region (``source(t)``).
+three wakes.  The estimator is the paper's scheme (4) with the model split
+f(q, u) = -div(q grad u) + u u_x: linear in q, so sigma = 0 and the
+parameter equation is the Darcy adjoint rule (Prop. 4.1) verbatim,
+q_t = grad z . grad (u - z) — the advection carries no q and drops out of
+the q-derivative.  Per Remark 2.1 the remaining nonlinearity is evaluated
+on the datum, z z_x, so it cancels from the continuous error system; the
+state row below is Darcy's weak form (18)-(19) plus the datum-side term
+-(z z_x, v).  (A1) holds exactly (L = 0) and (A3) with C = -Laplace, M = 1
+as for Darcy; (A2) is left unverified exactly as the paper leaves it for
+Darcy (Remark 4.2), and the heater grid is its discrete persistent-
+excitation surrogate.  See docs/DEVIATIONS.md for the full audit.
 
     .venv/bin/python examples/burgers_pipe.py --quick
     .venv/bin/python examples/burgers_pipe.py --config configs/burgers.yaml
@@ -75,7 +81,8 @@ class BurgersPipe(Problem):
     name = "burgers_pipe"
     box = ((0.0, 0.0), (LENGTH, HEIGHT))
     sigma = 0.0
-    symmetric = False  # the u u_x advection makes the joint form nonsymmetric
+    symmetric = False  # the q -> u coupling block makes the joint form
+    # nonsymmetric (block-triangular, as for Darcy; GMRES is the safe choice)
 
     def __init__(self, h=0.15, dt=1e-2, tend=5.0, k_u=3, seed=0,
                  series_counters=()):
@@ -100,10 +107,10 @@ class BurgersPipe(Problem):
         res += step.g * step.v * dx
         return a, res
 
-    # -- MRAS estimator: Darcy-type datum split plus the model's own
-    # advection u u_x carried on the trial with datum coefficient (the
-    # advection is known model, not an unknown-coefficient term, so it has
-    # no right-hand-side mirror)
+    # -- MRAS estimator: Darcy's weak form (18)-(19) plus the model's own
+    # advection evaluated on the datum (Remark 2.1: f acts on z, never on
+    # the trial state; the z z_x term is known model, so it is explicit on
+    # the right-hand side and drops out of the q row entirely)
     def forms(self, state):
         dt = self.dt
         z, z_old, gfu, gfq = state.z, state.z_old, state.gfu, state.gfq
@@ -111,12 +118,12 @@ class BurgersPipe(Problem):
         a += self.u * self.v * dx
         a += dt * grad(self.u) * grad(self.v) * dx
         a += dt * self.q * grad(z) * grad(self.v) * dx
-        a += dt * z * grad(self.u)[0] * self.v * dx
         a += self.q * self.s * dx
         res = LinearForm(self.X)
         res += gfu * self.v * dx
         res += dt * state.g * self.v * dx
         res += dt * grad(z) * grad(self.v) * dx
+        res += -dt * z * grad(z)[0] * self.v * dx
         res += gfq * self.s * dx
         res += dt * grad(z_old) * (grad(gfu) - grad(z_old)) * self.s * dx
         return a, res
