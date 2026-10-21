@@ -3,11 +3,10 @@
 
 Identifies the mobility q in  u_t = div((1 - q) grad u) + g  from noisy data
 of a reference solution generated with the true permeability.  The estimator
-here alternates an explicit L2 gradient step for q with an implicit step for
-u, the scheme of the legacy ``adaptive_darcy_decaying`` notebook; the paper's
-benchmarks use the joint solve of ``mras.Problem`` instead.  (The legacy
-notebook also tracked (z - z_old)/dt for a sigma coupling that this demo
-deactivates, so no time-difference term appears here.)
+alternates an explicit L2 gradient step for q with an implicit step for u —
+a sequential scheme, unlike the joint ``mras.Problem`` solve of the paper's
+benchmarks.  No (z - z_old)/dt term appears: the sigma coupling it would
+feed is zero here.
 
     .venv/bin/python examples/darcy_decaying.py --quick
 """

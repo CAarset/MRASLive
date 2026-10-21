@@ -112,7 +112,7 @@ def main():
         lines.append(f"| {c.noise_level:g} | {c.error_u[-1]:.4f} "
                      f"| {c.error_q[-1]:.4f} |")
     (indir / "table.md").write_text("\n".join(lines) + "\n")
-    print(f"wrote errors.png, table.md"
+    print("wrote errors.png, table.md"
           + (", fields_*.png" if rows_u else "") + f" in {indir}")
 
 

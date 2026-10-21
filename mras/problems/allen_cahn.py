@@ -68,7 +68,8 @@ class AllenCahnProblem(Problem):
         state.gfq.Set(0)
 
     def on_level_start(self, state, prev_state):
-        # The legacy loop keeps u_exact and z_old alive across noise levels.
+        # u_exact and z_old carry over across noise levels: every level
+        # observes the same reference trajectory.
         if prev_state is not None:
             self._u_exact.vec.data = prev_state.u_true.vec.Copy()
             state.z_old.vec.data = prev_state.z.vec.Copy()

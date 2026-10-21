@@ -5,7 +5,6 @@
 """
 
 import argparse
-import math
 from pathlib import Path
 
 import matplotlib
@@ -22,14 +21,6 @@ PROBLEMS = {
     "fisher": FisherProblem,
     "potential": PotentialProblem,
     "allen_cahn": AllenCahnProblem,
-}
-
-# bounding boxes of the benchmark domains, for the field figures
-BOXES = {
-    "darcy": ((0, 0), (1, 1)),
-    "fisher": ((-1.25, -1.25), (1.25, 1.25)),
-    "potential": ((-math.pi, -math.pi), (math.pi, math.pi)),
-    "allen_cahn": ((-2, -1), (2, 1)),
 }
 
 
@@ -64,7 +55,7 @@ def main():
     error_figure(results, prob.dt, fname=out / "errors.png")
     evolution_figure([[r.state.gfu for r in results],
                       [r.state.gfq for r in results]],
-                     BOXES[args.problem],
+                     prob.box,
                      col_labels=[f"level {r.noise_level:g}" for r in results],
                      row_labels=["u", "q"], fname=out / "final_fields.png")
     print(f"figures and npz files in {out}")

@@ -2,9 +2,8 @@
 """Nonlinear-in-parameter Helmholtz demo on the mras.Problem interface.
 
 Shows the headline workflow: bring your own mesh and weak forms. The model
-here is u_t = L Laplacian u + g(t) with the datum-driven parameter step,
-following the legacy ``adaptive_nonlinear_in_parameter__helmholtz__joint``
-notebook (sigma = 0, L = 5, zero ground-truth parameter).
+here is u_t = L Laplacian u + g(t) with the datum-driven parameter step
+(sigma = 0, L = 5, zero ground-truth parameter).
 
     .venv/bin/python examples/helmholtz_in_parameter.py --quick
 """

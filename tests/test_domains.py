@@ -41,8 +41,8 @@ def test_darcy_fully_dirichlet():
 
 
 def test_fisher_regex_quirk_leaves_space_free():
-    # The legacy fisher boundary names never match its dirichlet regex, so
-    # the U_h space is fully free; the clean domains module keeps this.
+    # The fisher boundary labels never match the Dirichlet regex, so the
+    # U_h space is fully free and constants survive a solve.
     gf = _mass_solve(fisher(maxh=0.2).Ufes)
     assert gf(-1.25, 0.0) == pytest.approx(1.0, abs=0.01)
     assert gf(0.0, 1.25) == pytest.approx(1.0, abs=0.01)

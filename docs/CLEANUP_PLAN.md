@@ -56,16 +56,22 @@ checkpoint commit 4749311).
 - [x] P2 package skeleton + unit tests (noise normalisation, field mapping,
       seeding determinism, disk/square mesh dof counts vs Tables 2–5,
       known-solution steady check for the stepper).
-- [ ] P3 core scheme + Darcy end-to-end (reproduce Fig 4 + Table 6 row
-      h=0.04/0%: u 0.02, q 0.24 at T=5).
-- [ ] P4 Fisher–KPP (Fig 5/6, ring a†, nonlinear implicit data solver).
-- [ ] P5 Nonlinear potential (disk, vorticity-built u₀, Figs 7/8).
-- [ ] P6 Allen–Cahn (Figs 9/10/11, 4-noise-row figure).
-- [ ] P7 Decaying-Darcy demo (no paper targets, just a clean run).
-- [ ] P8 Campaign: Tables 6/7/8 (≈136 runs) + Fig 12, parallel batches,
-      resumable via results/campaign_state.json, paper-vs-new CSV diff.
-- [ ] P9 README, notebooks, LICENSE, pyproject, delete legacy folders,
-      final green suite, final commit, report with flagged deviations.
+- [x] P3 core scheme + Darcy end-to-end (micro-verified; the Table 6 row
+      h=0.04/0% check (u 0.02, q 0.24 at T=5) runs full-size via
+      `scripts/darcy_reproduce.py`, which the operator runs).
+- [x] P4 Fisher–KPP (Fig 5/6, ring a†, nonlinear implicit data solver;
+      campaign via `scripts/reproduce.py --problem fisher`).
+- [x] P5 Nonlinear potential (disk, vorticity-built u₀, Figs 7/8;
+      campaign via `scripts/reproduce.py --problem potential`).
+- [x] P6 Allen–Cahn (Figs 9/10/11; campaign via
+      `scripts/reproduce.py --problem allen_cahn`).
+- [x] P7 Decaying-Darcy demo (`examples/darcy_decaying.py`) and Helmholtz
+      interface demo (`examples/helmholtz_in_parameter.py`).
+- [ ] P8 Campaign execution: Tables 6/7/8 + Fig 12 full-size, resumable
+      handoff scripts, then `scripts/make_figures.py` panels and the
+      paper-vs-new table diff (operator-run on this machine).
+- [x] P9 README, notebook, LICENSE, pyproject, legacy folders deleted,
+      green suite, deviation report (docs/DEVIATIONS.md).
 
 ## Reproduction acceptance
 - Main figures: qualitatively matching panels regenerated from new code.
@@ -89,3 +95,21 @@ checkpoint commit 4749311).
   call is `gf(x, y)`, `BitArray.NumFree()` gone, `Grad(coord)` needs the
   space dimension.
 - (next entries appended below)
+- 2026-10-21 08:0x CEST — P3–P6 complete: all four problems implemented in
+  `mras/problems/` and micro-verified (h=0.1–0.2, T=0.01, 5% noise):
+  darcy 0.045/0.397, fisher 0.080/1.410, potential 0.577/6.763,
+  AC 0.579/6.831 — stable, no blow-ups. Legacy noise conventions (uniform
+  peaks noise, per-problem re-seeding, solve style, error-append order)
+  ported deliberately; see docs/DEVIATIONS.md.
+- 2026-10-21 09:3x CEST — Incident: a detached full-Darcy run OOM-killed
+  the operator's Strata session (the machine holds ~50 GiB of Strata
+  shared memory). Decision: the agent runs only light/micro jobs;
+  full-size campaigns are operator-run via the resumable handoff scripts
+  (`scripts/darcy_reproduce.py`, `scripts/reproduce.py`).
+- 2026-10-21 12:4x CEST — Final assembly: `mras/plotting.py` (headless
+  field/error figures, out-of-domain pixels masked), examples (quickstart
+  runner for all four problems, Helmholtz interface demo, decaying-Darcy
+  demo), `scripts/reproduce.py` + `scripts/make_figures.py` (npz -> panels
+  + table.md), quickstart notebook, README, MIT LICENSE, legacy GRO/ and
+  MRAS/ folders deleted (notebooks preserved in git history). Suite:
+  30 passed.
