@@ -19,12 +19,15 @@ The expected verdicts are the audit results of the paper's examples:
   unverifiable and the self-step is a documented deviation.
 """
 
+import re
+
 import numpy as np
 import pytest
 
 from mras.problems import AllenCahnProblem
+from mras.problems.arrhenius import _ArrheniusBase
 from mras.verify import (DEVIATION, FAIL, OK, UNVERIFIABLE, _datum_array,
-                         _datum_cells_mean, check_example)
+                         _datum_cells_mean, check_example, run_checks)
 
 EXPECTED = {
     "darcy": {"adjoint": OK, "(A1)": OK, "(A2)": FAIL, "(A3)": UNVERIFIABLE,
@@ -81,3 +84,85 @@ def test_checklist_verdicts_match_the_documented_audit(name):
     assert set(got) == set(expected), (name, [c.name for c in checks])
     bad = {k: (v, got[k]) for k, v in expected.items() if got[k] != v}
     assert not bad, (name, [(c.name, c.status, c.detail) for c in checks])
+
+
+class QuadraticRateProblem(_ArrheniusBase):
+    """A deliberately NEW example for the checklist: rate law
+    r(w) = 1 + w + w^2, uniformly positive (min 3/4 at w = -1/2), so
+    (A2) holds globally with C_coe = ess inf r(z) = 3/4 whenever the
+    datum dips below -1/2 (it does: its weak ess inf is ~ -0.6).  The
+    analytic witness must minimise r over the datum range -- r(ess inf)
+    alone would over-report (0.76 vs 0.75) -- which is exactly the hook
+    a future author implements; nothing in mras/verify.py is modified
+    or even informed of this problem."""
+
+    name = "quadratic_rate"
+
+    @staticmethod
+    def r(w):
+        return 1 + w + w * w
+
+    @staticmethod
+    def rprime(w):
+        return 1 + 2 * w
+
+    @staticmethod
+    def witness(lo):  # unused: c_coe() below takes the range minimum
+        return 0.75
+
+    def c_coe(self):
+        lo, hi = self.essinf_datum(), self.data_range()[1]
+        cands = [self.r(lo), self.r(hi)]
+        if lo < -0.5 < hi:
+            cands.append(0.75)
+        return float(min(cands))
+
+
+class BareQuadraticProblem(QuadraticRateProblem):
+    """Same physics, no theory hooks declared: the honest-degradation
+    contract -- every check still fires, and the rungs that need a
+    declared structure report UNVERIFIABLE instead of passing silently.
+    The adjoint probe must still pass: it probes the ASSEMBLED forms,
+    requiring no declaration at all."""
+
+    coupling_kernel = None
+    monotone_pair = None
+    c_coe = None
+    C_scale = None
+
+
+def _run_quadratic(cls):
+    p = cls(h=0.4, dt=0.05, tend=1.5, data_h=0.2)
+    res = p.run_level(0, progress=False)
+    checks = run_checks(p, res.state, res.error_q)
+    keys = ("adjoint", "(A1)", "(A2)", "(A3)", "persistent",
+            "reconstruction")
+    out = {}
+    for c in checks:
+        out.update({k: c for k in keys if c.name.startswith(k) or k in c.name})
+    return out
+
+
+def test_new_example_with_hooks_gets_the_full_ladder_automatically():
+    got = _run_quadratic(QuadraticRateProblem)
+    assert len(got) == 6, [c.name for c in got.values()]
+    for key, c in got.items():
+        assert c.status == OK, (key, c.status, c.detail)
+    # the (A2) rung must use the analytic witness, at the honest value:
+    est = float(re.search(r">=\s*([0-9.eE+-]+)", got["(A2)"].detail).group(1))
+    assert 0.7 <= est <= 0.76, got["(A2)"].detail
+    assert "analytic" in got["(A2)"].detail
+    # adjoint to numerical precision, no author-side effort:
+    assert "machine precision" in got["adjoint"].detail
+
+
+def test_new_example_without_hooks_degrades_to_flagged_unverifiable():
+    got = _run_quadratic(BareQuadraticProblem)
+    expected = {"adjoint": OK,              # numeric probe of the forms
+                "(A1)": UNVERIFIABLE,       # no f-hook to classify
+                "(A2)": UNVERIFIABLE,       # no structure to probe
+                "(A3)": UNVERIFIABLE,       # no C_scale, no C_coe
+                "persistent": OK, "reconstruction": OK}
+    got_status = {k: c.status for k, c in got.items()}
+    assert got_status == expected, {k: c.detail for k, c in got.items()}
+
