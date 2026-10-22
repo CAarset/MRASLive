@@ -69,54 +69,78 @@ level; `mras/live.py` holds all
 the plumbing (demo sizing, frame recording, static ranges, the ffmpeg
 stitch).  Run it with `jupyter lab notebooks/mras_live.ipynb`.
 
-## Bring your own mesh and weak form
+## Your own reconstruction problem, step by step
 
 A problem is a `mras.Problem` subclass on `(U_h, Q_h) = P3 x P0` over any
-NGSolve mesh.  One hook is mandatory — the joint bilinear/linear forms of a
-single MRAS step:
+NGSolve mesh.  Five decisions — exactly one hook is mandatory, the others
+unlock automatic verification:
+
+**1. Domain.**  Reuse a builder (`mras.domains.darcy(maxh=h, order_u=k_u,
+order_q=0)` for a rectangle, `fisher`, `potential`) or return your own
+`Domains(mesh, Ufes, Qfes)`: geometry (see the CSG2d pipe in
+`examples/burgers_pipe.py`), Dirichlet boundaries, element orders.
+
+**2. Where do the data come from?**  Exactly one of three hooks, resolved in
+this order:
+
+* `observations(state)` — you have measurements, as a `GridFunction` that
+  already contains its own noise; run at level 0.
+* `truth(state)` — synthetic data: observations = truth + seeded FEM Gaussian
+  noise at the requested level; `error_u`, `error_q` become available.
+* `forward_forms(step)` — no data at all: the driver steps *your forward weak
+  form* (backward Euler) on a finer mesh (`data_domains`) to generate the
+  observations, with `source(t)`, `u0` and `q_true` as inputs.
+
+`q_true` and `initial_guess()` (zero by default) set the parameter field and
+the estimator's start — the initial error *is* an experimental choice.
+`symmetric = False` routes the nonsymmetric joint solve through GMRES.
+
+**3. The MRAS step — the only mandatory hook.**  `forms(state)` returns the
+joint `(BilinearForm, LinearForm)` of one step: mass rows `u*v`, `q*s`, the
+diffusion of your choice (the `C` slot), the `sigma`-bracket
+`Dt z + f(q,z) - g`, and the aligned tracking term from `state.z`/`z_old`.
+Worked templates: `examples/burgers_pipe.py` (complete — pipe geometry,
+forward and estimator forms side by side, heater-grid source supplying the
+persistent excitation the parameter flow needs) and
+`mras/problems/arrhenius.py` (the fully verifiable reference).  Then run:
 
 ```python
-from mras.scheme import Problem
-
-class MyProblem(Problem):
-    name = "my_problem"
-
-    def forms(self, state):                   # one MRAS step as a joint BVP
-        a, res = BilinearForm(self.X), LinearForm(self.X)
-        a += self.u * self.v * dx + self.q * self.s * dx
-        # ... model terms and the datum-gradient q term from the paper ...
-        return a, res
+p = MyProblem(h=0.2, dt=0.05, tend=1.5, seed=0)
+res = p.run_level(0)                 # LevelResult: error_q, error_u, series
+p.run(levels=[0.0, 0.05])            # campaign; then error_figure(results, p.dt)
+.venv/bin/python examples/burgers_pipe.py --quick     # template smoke run
 ```
 
-Data are then resolved by whichever hook you provide, in this order:
+**4. Two things are verdicts, not choices.**  `sigma` is forced by the
+structure of `f`: 0 iff `f` is affine in `q` — the checklist derives the
+family from your declarations and *fails* a mismatch.  `adjoint_deviation`
+may be set only to document a deliberate deviation from the paper-literal
+row, with a reason; that turns a FAIL into a documented DEVIATION.
 
-* `observations(state)` — you have measurements: hand them over as a
-  `GridFunction`.  State misfit `‖u − z‖` is always reported; comparing to a
-  truth additionally requires the next hook.
-* `truth(state)` — synthetic data: observations are the truth plus seeded
-  FEM Gaussian noise at the requested level, and `error_u`, `error_q` become
-  available.
-* `forward_forms(step)` — no data at all: the driver steps *your forward
-  weak form* (backward Euler) on a finer mesh (`data_domains`) to generate
-  the observations itself, with `source(t)` and `u0` as inputs.
+**5. Theory hooks — each declaration unlocks one rung of the checklist**
+(`run_checks(p, res.state, res.error_q)` on any instance, or one registry
+line in `mras/verify.py` plus `check_example("my_problem")`):
 
-`q_true` and `initial_guess()` set the parameter field and the estimator's
-start; `symmetric = False` routes the (nonsymmetric) joint solve through
-GMRES instead of `BVP` + local smoothing.
+| declare | unlocks automatically | without it |
+|---|---|---|
+| `coupling_kernel(z, v)` — the affine pairing `int p * f_q* s` | (A1) affine family, sigma consistency, `L = 0` exact; (A2) kernel probe | (A1), (A2) unverifiable |
+| `monotone_pair(qa, qb, z)` — pointwise monotone kernel of nonlinear `f` | (A1) nonlinear family + sigma = 1 requirement; (A2) localised pair probe, measured minimum | (A1), (A2) unverifiable |
+| `c_coe()` — analytic witness (ess-inf or volume average of the multiplier over the datum range; helpers `data_range()`, `essinf_datum()` exist per family) | (A2) OK *with provenance*, feeding the (A3) margin | probe-only value |
+| `C_scale` (`C = C_scale*(-Delta)`) — or norm-dependent `C` inside `forms` | (A3) margin `lambda_1(C) > L^2/(2 C_coe)` with the slack reported for `M` | (A3) unverifiable |
 
-`examples/burgers_pipe.py` is the complete worked template: a 2D
-time-dependent Burgers equation on a pipe with interior holes (CSG2d), no
-data files, forward and estimator weak forms side by side, a heater-grid
-source supplying the persistent excitation (`|grad z| > 0`) the parameter
-flow needs:
+What you get with *no* declarations at all, never silently: adjoint pairing
+(probed on the **assembled step operator**, needs no hooks), persistent
+excitation, reconstruction descent, and — via `check_example` — seeded
+reproducibility.  The ladder `OK > DEVIATION > UNVERIFIABLE > FAIL` is the
+contract pinned by `tests/test_verify.py`, which includes a *new* example
+built by pure inheritance — rate law `r(w) = 1 + w + w^2` with its witness
+minimised over the datum range (`QuadraticRateProblem`), and a bare variant
+asserting the honest degradation.  Copy that pattern for your problem.
 
-```bash
-.venv/bin/python examples/burgers_pipe.py --quick
-```
-
-`examples/helmholtz_in_parameter.py` shows the nonlinear-in-parameter
-(INCREMENTAL) variant; `examples/darcy_decaying.py` the lower-level
-`ImplicitStepper` API.
+Still author-side for nonlinear-in-`q` examples: the closed-form Lipschitz
+modulus `L(||q||)` (declare `L`; the derive/estimate/prompt ladder is
+specified in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md) section 5, pending
+implementation) — for affine families `L = 0` is exact, nothing to do.
 
 ## Verification checklist
 
