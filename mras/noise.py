@@ -44,15 +44,15 @@ class GaussianFEMNoise:
     a few dozen terms.
 
     Afterwards the draw is renormalized with the exact mass norm, so that
-    ``||e||_L2 == level * ||gf||_L2`` holds identically: the polynomial filter
+    ``||e||_L2 == noise_level * ||gf||_L2`` holds identically: the polynomial filter
     only perturbs the spectral shape of the noise, never its amplitude.
 
     The noise lives entirely in ``U_h`` and vanishes on Dirichlet-constrained
     degrees of freedom, so ``z`` inherits the boundary values of ``gf``.
 
-    All randomness is keyed by ``(seed, level, counter)``: equal keys give
+    All randomness is keyed by ``(seed, noise_level, counter)``: equal keys give
     bit-identical draws regardless of call order or intervening draws.
-    ``level == 0`` returns an exact copy of ``gf`` without consuming
+    ``noise_level == 0`` returns an exact copy of ``gf`` without consuming
     randomness.
 
     Parameters
@@ -157,17 +157,18 @@ class GaussianFEMNoise:
         w = np.array(self._mm.matvec(v))
         return float(np.sqrt(max(v[self.idx] @ w[self.idx], 0.0)))
 
-    def draw(self, gf, level, counter):
-        """Return a fresh GridFunction ``z = gf + e`` with noise of relative L2 level."""
-        if level < 0:
-            raise ValueError(f"noise level must be non-negative, got {level}")
+    def draw(self, gf, noise_level, counter):
+        """Return a fresh GridFunction ``z = gf + e`` whose noise ``e`` has
+        relative L2 norm ``noise_level``."""
+        if noise_level < 0:
+            raise ValueError(f"noise level must be non-negative, got {noise_level}")
         z = GridFunction(self.fes)
         gfv = np.array(gf.vec.FV().NumPy())
-        if level == 0:
+        if noise_level == 0:
             z.vec.FV().NumPy()[:] = gfv
             return z
 
-        rng = seeded_rng(self.seed, int(round(level * 1e6)), int(counter))
+        rng = seeded_rng(self.seed, int(round(noise_level * 1e6)), int(counter))
         eta = np.zeros(self.fes.ndof)
         eta[self.idx] = rng.standard_normal(self.idx.size)
 
@@ -186,6 +187,6 @@ class GaussianFEMNoise:
 
         norm_e = self._mass_norm(e)
         if norm_e > 0.0:
-            e *= level * self._mass_norm(gfv) / norm_e
+            e *= noise_level * self._mass_norm(gfv) / norm_e
         z.vec.FV().NumPy()[:] = gfv + e
         return z

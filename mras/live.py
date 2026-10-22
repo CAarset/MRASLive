@@ -340,15 +340,15 @@ def _display_movie(path):
     display(Video(str(path), embed=True, mimetype="video/mp4"))
 
 
-def run_live(example, level=0.0, every=5, live=False, fps=24.0, path=None,
+def run_live(example, noise_level=0.0, every=5, live=False, fps=24.0, path=None,
              **kwargs):
     """Assimilate one noise level with the six-panel view.
 
     ``example`` is a name from :data:`EXAMPLES` (or an already-built
-    ``Problem``); ``level`` is the relative L2 noise of the data
+    ``Problem``); ``noise_level`` is the relative L2 noise of the data
     (``0.05`` = 5 %).  By default the run is stitched into an mp4 with a
     fixed frame rate (frames every ``every`` steps, static colorbars) and
-    displayed; ``path`` overrides ``results/<name>_level<n>.mp4``.  With
+    displayed; ``path`` overrides ``results/<name>_noise<n>.mp4``.  With
     ``live=True`` the panels stream live in the notebook instead.  Returns
     the :class:`~mras.results.LevelResult`.
     """
@@ -358,7 +358,7 @@ def run_live(example, level=0.0, every=5, live=False, fps=24.0, path=None,
         panels.show()
         prob.on_step = panels.update
         try:
-            result = prob.run_level(level)
+            result = prob.run_level(noise_level)
         finally:
             prob.on_step = None
         panels.update(result.state, force=True)
@@ -366,11 +366,11 @@ def run_live(example, level=0.0, every=5, live=False, fps=24.0, path=None,
     panels = LivePanels(prob, every=every, scenes=False, record=True)
     prob.on_step = panels.update
     try:
-        result = prob.run_level(level)
+        result = prob.run_level(noise_level)
     finally:
         prob.on_step = None
     if path is None:
-        path = Path("results") / f"{prob.name}_level{level:g}.mp4"
+        path = Path("results") / f"{prob.name}_noise{noise_level:g}.mp4"
     movie = make_movie(panels, path, fps=fps)
     _display_movie(movie)
     return result

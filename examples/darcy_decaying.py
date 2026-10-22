@@ -47,7 +47,7 @@ def reference(dt, tsteps, q_true, Ufes, V, grids):
     return u_exact
 
 
-def identify(dt, tsteps, levels, mesh, Ufes, Qfes, q_true, u_exact, u_init,
+def identify(dt, tsteps, noise_levels, mesh, Ufes, Qfes, q_true, u_exact, u_init,
              source, noise):
     """Alternate q-gradient and implicit u steps; yields error histories."""
     s = Qfes.TrialFunction()
@@ -66,14 +66,14 @@ def identify(dt, tsteps, levels, mesh, Ufes, Qfes, q_true, u_exact, u_init,
     gfq = GridFunction(Qfes)
     gfu = GridFunction(Ufes)
     z = GridFunction(Ufes)
-    for level in levels:
+    for noise_level in noise_levels:
         gfu.Set(u_init)
         gfq.Set(IfPos(0.42 ** 2 - r, 1, 0))
         error_u = [l2norm(gfu - u_exact[0], mesh)]
         error_q = [l2norm(gfq - q_true, mesh)]
         for i in range(tsteps - 1):
             z.Set(u_exact[i])
-            z.Set(noise.draw(z, level, i + 1))
+            z.Set(noise.draw(z, noise_level, i + 1))
             # explicit L2-gradient step on the tracking functional
             f_deriv = grad(z) * (grad(gfu) - grad(z))
             rhs = LinearForm(Qfes)
@@ -86,7 +86,7 @@ def identify(dt, tsteps, levels, mesh, Ufes, Qfes, q_true, u_exact, u_init,
             stepper_u.step(gfu, source, rhs_gradv_factor=1 - gfq,
                            rhs_gradv=z)
             error_u.append(l2norm(gfu - u_exact[i + 1], mesh))
-        yield level, np.array(error_u), np.array(error_q)
+        yield noise_level, np.array(error_u), np.array(error_q)
 
 
 def main():
@@ -95,7 +95,7 @@ def main():
     ap.add_argument("--tend", type=float, default=1.5)
     ap.add_argument("--tsteps", type=int, default=100)
     ap.add_argument("--sample", type=int, default=0)
-    ap.add_argument("--levels", type=float, nargs="+", default=[0.0, 0.03])
+    ap.add_argument("--noise-levels", type=float, nargs="+", default=[0.0, 0.03])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--quick", action="store_true", help="small sizes, seconds")
     ap.add_argument("--out", default="results/darcy_decaying")
@@ -121,15 +121,15 @@ def main():
     u_init = to_gridfunc(grids[0], Ufes)
 
     fig, axes = plt.subplots(1, 2, figsize=(9, 3.2))
-    for level, eu, eq in identify(dt, args.tsteps, args.levels, mesh, Ufes,
+    for noise_level, eu, eq in identify(dt, args.tsteps, args.noise_levels, mesh, Ufes,
                                   Qfes, q_true, u_exact, u_init, source,
                                   noise):
         t = dt * np.arange(len(eu))
-        axes[0].plot(t, eu, label=f"level {level:g}")
-        axes[1].plot(t, eq, label=f"level {level:g}")
-        np.savez_compressed(out / f"level_{level:g}".replace(".", "p"),
+        axes[0].plot(t, eu, label=f"noise_level={noise_level:g}")
+        axes[1].plot(t, eq, label=f"noise_level={noise_level:g}")
+        np.savez_compressed(out / f"level_{noise_level:g}".replace(".", "p"),
                             error_u=eu, error_q=eq)
-        print(f"level {level:g}: err_u={eu[-1]:.4f} err_q={eq[-1]:.4f}")
+        print(f"noise_level={noise_level:g}: err_u={eu[-1]:.4f} err_q={eq[-1]:.4f}")
     for ax, name in zip(axes, ["u", "q"]):
         ax.set_yscale("log")
         ax.set_xlabel("t")

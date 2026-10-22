@@ -5,6 +5,8 @@ import pathlib
 
 import numpy as np
 
+from mras.config import load_yaml
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
@@ -43,7 +45,6 @@ def test_burgers_forward_generation_and_tracking():
 
 
 def test_burgers_config_yaml():
-    from mras.config import load_yaml
     cfgs = load_yaml(ROOT / "configs" / "burgers.yaml")
     assert len(cfgs) >= 2
-    assert all(c.h > 0 and c.dt > 0 and c.levels for c in cfgs)
+    assert all(c.h > 0 and c.dt > 0 and c.noise_levels for c in cfgs)

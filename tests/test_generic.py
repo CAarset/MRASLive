@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
-from ngsolve import (BilinearForm, GridFunction, LinearForm, dx, exp, grad,
-                     x, y)
+from ngsolve import (BilinearForm, Grad, GridFunction, LinearForm, dx, exp,
+                     grad, x, y)
 
 from mras.domains import darcy
-from mras.scheme import Problem
+from mras.scheme import Problem, TheorySpecError
 
 BUMP = exp(-((x - 0.5) ** 2 + (y - 0.5) ** 2) / 0.05)
 
@@ -38,6 +38,12 @@ class ForwardProblem(Problem):
         res += step.g * step.v * dx
         return a, res
 
+    def coupling(self, q, z, s):
+        return q * Grad(z) * Grad(s)
+
+    def coupling_adjoint(self, q, z, s):
+        return Grad(z) * Grad(s)
+
     def forms(self, state):
         dt = self.dt
         a = BilinearForm(self.X)
@@ -58,6 +64,7 @@ class ObservationProblem(Problem):
     """Known data supplied directly, ground truth unknown: misfit only."""
 
     name = "obs_only"
+    theory_exempt = "data-layer probe; the step forms carry no q-dependence"
 
     def __init__(self, h=0.2, dt=2e-2, tsteps=4, seed=0):
         super().__init__(darcy(maxh=h, order_u=2, order_q=0),
@@ -79,6 +86,7 @@ class TruthProblem(Problem):
     """Ground truth supplied analytically: synthetic noisy data + errors."""
 
     name = "truth_gen"
+    theory_exempt = "data-layer probe; the step forms carry no q-dependence"
 
     def __init__(self, h=0.2, dt=2e-2, tsteps=4, seed=0):
         super().__init__(darcy(maxh=h, order_u=2, order_q=0),
@@ -158,6 +166,7 @@ def test_truth_hook_adds_seeded_noise_and_errors():
 
 
 def test_starved_problem_raises():
-    prob = StarvedProblem()
-    with pytest.raises(NotImplementedError):
-        prob.run([0.0], progress=False)
+    # The constructor now rejects the problem before any stepping, naming
+    # the missing data hook among the gaps.
+    with pytest.raises(TheorySpecError, match="data hook"):
+        StarvedProblem()

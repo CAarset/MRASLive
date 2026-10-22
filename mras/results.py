@@ -8,7 +8,7 @@ import numpy as np
 
 @dataclass
 class LevelResult:
-    """Error histories and solution snapshots for one (problem, level) run."""
+    """Error histories and solution snapshots for one (problem, noise level) run."""
 
     problem: str
     noise_level: float
@@ -20,7 +20,7 @@ class LevelResult:
     series_gfu: np.ndarray
     series_gfq: np.ndarray
     meta: dict = field(default_factory=dict)
-    # Final solver state of the level, kept for post-run field figures.
+    # Final solver state of the run, kept for post-run field figures.
     state: object = None
     # ||u - z|| per step: reported for every run, error histories only
     # when a ground truth is available.

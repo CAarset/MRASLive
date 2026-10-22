@@ -82,7 +82,7 @@ class FisherProblem(Problem):
             t += self.dt
 
     # -- driver hooks --------------------------------------------------------
-    def init_level(self, state):
+    def init_run(self, state):
         state.gfu.Set(self._u0())
         state.u_true.Set(self._u0())
         state.gfq.Set(IfPos(xc + 1.15, 1, 0) * IfPos(1.15 - xc, 1, 0)
@@ -91,7 +91,7 @@ class FisherProblem(Problem):
     def data(self, state):
         state.u_true.vec.data = np.asarray(self.u_exact[state.counter - 1],
                                            dtype=np.float64)
-        state.set_z(self.noise.draw(state.u_true, state.level, state.counter))
+        state.set_z(self.noise.draw(state.u_true, state.noise_level, state.counter))
         state.g = GridFunction(self.Ufes)
         state.g.Set(self._g(state.t.Get()))
 
@@ -102,8 +102,11 @@ class FisherProblem(Problem):
     L = 0.0
     C_scale = 1.0
 
-    def coupling_kernel(self, z, v):
-        return Grad(z) * Grad(v)
+    def coupling(self, q, z, s):
+        return q * Grad(z) * Grad(s)
+
+    def coupling_adjoint(self, q, z, s):
+        return Grad(z) * Grad(s)
 
     def forms(self, state):
         dt = self.dt

@@ -15,7 +15,7 @@ from mras.problems.darcy import DarcyProblem
 @pytest.fixture(scope="module")
 def micro_result():
     prob = DarcyProblem(h=0.3, dt=1e-3, tend=0.005, seed=0)
-    return prob.run(levels=[0.0], progress=False)[-1]
+    return prob.run(noise_levels=[0.0], progress=False)[-1]
 
 
 def test_sample_field_constant(small_darcy):

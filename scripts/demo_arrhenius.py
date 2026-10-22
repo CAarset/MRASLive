@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Reconstruction demo for the Arrhenius pair (sixth/seventh examples).
 
-Runs both members of the pair at the shipped configuration, level 0, and
+Runs both members of the pair at the shipped configuration, noise level 0% (noise-free), and
 writes results/arrhenius_pair.png: q_true, the converged estimate, the
 error field, and the error history.
 

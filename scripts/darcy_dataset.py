@@ -13,6 +13,10 @@ validation flag on the paper's dataset choice, not a replacement.
     .venv/bin/python scripts/darcy_dataset.py --quick   # needs ~5 min, low mem
 
 Outputs: results/darcy_dataset/darcy_ngsolve.h5 and comparison.json.
+
+
+CLEANUP-FLAG (pre-push): exploration/reproduction harness, off
+the user path; delete before push (docs/CLEANUP_FLAGS.md).
 """
 
 import argparse
@@ -50,7 +54,7 @@ def build(path):
 
 def run_case(label, **kwargs):
     prob = DarcyProblem(**kwargs)
-    result = prob.run(levels=[0.05], progress=False)[-1]
+    result = prob.run(noise_levels=[0.05], progress=False)[-1]
     return {"case": label, "final_error_u": result.final_error_u,
             "final_error_q": result.final_error_q}
 

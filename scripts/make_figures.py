@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """Assemble figures and the table summary from campaign output directories.
 
-Reads <in>/table.json plus the per-level npz files written by
+Reads <in>/table.json plus the per-noise-level npz files written by
 scripts/darcy_reproduce.py or scripts/reproduce.py, and writes
 
-    <in>/errors.png              error histories, one row per level
-    <in>/fields_<level>.png      u and q snapshots at the paper time instants
+    <in>/errors.png              error histories, one row per noise level
+    <in>/fields_<noise_level>.png      u and q snapshots at the paper time instants
     <in>/table.md                markdown table of final errors
 
     .venv/bin/python scripts/make_figures.py --problem fisher --in results/fisher
@@ -40,9 +40,9 @@ PROBLEMS = {
 class _Curves:
     """Duck-typed LevelResult: just what error_figure reads."""
 
-    def __init__(self, problem, level, error_u, error_q):
+    def __init__(self, problem, noise_level, error_u, error_q):
         self.problem = problem
-        self.noise_level = level
+        self.noise_level = noise_level
         self.error_u = error_u
         self.error_q = error_q
 
@@ -69,17 +69,17 @@ def main():
     times = [0.0] + [t for t in spec["times"] if round(t / dt) <= tsteps]
     counters = [0] + [round(t / dt) for t in times[1:]]
 
-    levels = sorted(float(name[len(args.problem) + 1:].replace("p", "."))
+    noise_levels = sorted(float(name[len(args.problem) + 1:].replace("p", "."))
                     for name in (f.stem for f in indir.glob("*.json"))
                     if name.startswith(args.problem))
-    if not levels:
-        raise SystemExit(f"no {args.problem}_<level>.json files in {indir}")
+    if not noise_levels:
+        raise SystemExit(f"no {args.problem}_<noise_level>.json files in {indir}")
 
     curves, rows_u, rows_q = [], [], []
-    for level in levels:
-        stem = f"{args.problem}_{level:g}".replace(".", "p")
+    for noise_level in noise_levels:
+        stem = f"{args.problem}_{noise_level:g}".replace(".", "p")
         data = np.load(indir / f"{stem}.npz")
-        curves.append(_Curves(args.problem, level, data["error_u"],
+        curves.append(_Curves(args.problem, noise_level, data["error_u"],
                               data["error_q"]))
         if "series_gfu" in data:
             if not rows_u:  # one problem instance provides the FE spaces
@@ -99,11 +99,11 @@ def main():
 
     if rows_u:
         labels = [f"{t:g}" if i else "t=0" for i, t in enumerate(times)]
-        for level, ru, rq in zip(levels, rows_u, rows_q):
+        for noise_level, ru, rq in zip(noise_levels, rows_u, rows_q):
             evolution_figure([ru, rq], prob.box, col_labels=labels,
                              row_labels=["u", "q"],
                              fname=indir
-                             / (f"fields_{level:g}".replace(".", "p") + ".png"))
+                             / (f"fields_{noise_level:g}".replace(".", "p") + ".png"))
 
     lines = [f"# {args.problem} — h={table['h']:g}, dt={dt:g}, "
              f"T={table['tend']:g}", "",

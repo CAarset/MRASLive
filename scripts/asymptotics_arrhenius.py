@@ -7,6 +7,10 @@ member of the pair at shipped design parameters to `--tend` and prints
 the trajectory plus a log-linear decay fit on the final window.
 
 usage: python scripts/asymptotics_arrhenius.py [linear|exp]
+
+
+CLEANUP-FLAG (pre-push): exploration/reproduction harness, off
+the user path; delete before push (docs/CLEANUP_FLAGS.md).
 """
 import sys
 import time

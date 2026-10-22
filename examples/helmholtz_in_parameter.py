@@ -2,10 +2,15 @@
 """Nonlinear-in-parameter Helmholtz demo on the mras.Problem interface.
 
 Shows the headline workflow: bring your own mesh and weak forms. The model
-here is u_t = L Laplacian u + g(t) with the datum-driven parameter step
-(sigma = 0, L = 5, zero ground-truth parameter).
+here is u_t = nu Laplacian u + g(t) with the datum-driven parameter step
+(sigma = 0, diffusion nu = 5, zero ground-truth parameter).
 
     .venv/bin/python examples/helmholtz_in_parameter.py --quick
+
+
+CLEANUP-FLAG (pre-push): placeholder for the scalar-q Helmholtz
+rework (docs/ASSUMPTIONS.md section 6); deleting it also drops the
+mras/verify.py registry line and the tests/test_verify.py row.
 """
 
 import argparse
@@ -23,14 +28,16 @@ SOURCE = 2 * exp(-((x - 0.5) ** 2 / 0.05 + (y - 0.45) ** 2 / 0.1))
 
 
 class HelmholtzProblem(Problem):
-    """Identify q in u_t = L Laplacian u + g, with the quadratic q-step."""
+    """Identify q in u_t = nu Laplacian u + g, with the quadratic q-step."""
 
     name = "helmholtz"
     sigma = 0.0
-    L = 5.0  # diffusion coefficient: C = L * (-Laplace); no q in the truth,
-    # so the (A1)/(A2)/(A3) ladder is vacuous and the q-update is the
-    # paper's quadratic self-step (mras/verify.py flags this unverifiable)
-    C_scale = 5.0
+    diffusion = 5.0  # the model's Laplacian coefficient
+    C_scale = 5.0  # tracking operator C = 5 * (-Laplace)
+    # No q in the truth model, so the coupling ladder is vacuous and the
+    # q-update is the paper's quadratic self-step (mras/verify.py reports
+    # UNVERIFIABLE for every rung).
+    theory_exempt = "parameter absent from the truth model"
     adjoint_deviation = ("parameter absent from the truth model: no adjoint "
                          "pair exists by construction (quadratic self-step)")
 
@@ -62,7 +69,7 @@ class HelmholtzProblem(Problem):
             u_exact.append(snap)
         return coef_0, u_exact
 
-    def init_level(self, state):
+    def init_run(self, state):
         state.gfu.Set(self.coef_0)
         state.u_true.Set(self.coef_0)  # exact state at t = 0
         state.gfq.Set(0.0)
@@ -73,17 +80,17 @@ class HelmholtzProblem(Problem):
     def forms(self, state):
         z, z_old, gfu, gfq = state.z, state.z_old, state.gfu, state.gfq
         g = SOURCE * exp(-state.t)
-        dt, L = self.dt, self.L
+        dt, nu = self.dt, self.diffusion
         a = BilinearForm(self.X)
         a += self.u * self.v * dx
-        a += dt * L * grad(self.u) * grad(self.v) * dx
+        a += dt * nu * grad(self.u) * grad(self.v) * dx
         a += -dt * gfq * self.q * z * self.v * dx
         a += self.q * self.s * dx
         res = LinearForm(self.X)
         res += gfu * self.v * dx
         res += dt * g * self.v * dx
         res += -dt * grad(z_old) * grad(self.v) * dx
-        res += dt * L * grad(z_old) * grad(self.v) * dx
+        res += dt * nu * grad(z_old) * grad(self.v) * dx
         res += gfq * self.s * dx
         res += -2 * dt * z_old * (gfu - z_old) * self.s * dx
         return a, res
@@ -94,7 +101,7 @@ def main():
     ap.add_argument("--h", type=float, default=0.08)
     ap.add_argument("--tend", type=float, default=1.5)
     ap.add_argument("--tsteps", type=int, default=1000)
-    ap.add_argument("--levels", type=float, nargs="+", default=[0.0, 0.05])
+    ap.add_argument("--noise-levels", type=float, nargs="+", default=[0.0, 0.05])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--quick", action="store_true", help="small sizes, seconds")
     ap.add_argument("--out", default="results/helmholtz")
@@ -107,10 +114,10 @@ def main():
 
     prob = HelmholtzProblem(h=args.h, tend=args.tend, tsteps=args.tsteps,
                             seed=args.seed)
-    results = prob.run(args.levels)
+    results = prob.run(args.noise_levels)
     for res in results:
         res.save(out)
-        print(f"level {res.noise_level:g}: err_u={res.final_error_u:.4f} "
+        print(f"noise_level={res.noise_level:g}: err_u={res.final_error_u:.4f} "
               f"err_q={res.final_error_q:.4f}")
 
     error_figure(results, prob.dt, fname=out / "errors.png")

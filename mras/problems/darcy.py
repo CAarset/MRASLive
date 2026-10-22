@@ -82,7 +82,7 @@ class DarcyProblem(Problem):
             self.u_exact[counter] = proj.vec.FV().NumPy()
 
     # -- driver hooks ------------------------------------------------------
-    def init_level(self, state):
+    def init_run(self, state):
         state.gfu.Set(self.u0)
         state.u_true.Set(self.u0)
         state.gfq.Set(self.initial_guess())
@@ -97,7 +97,7 @@ class DarcyProblem(Problem):
         state.u_true.vec.data = np.asarray(self.u_exact[counter - 1],
                                            dtype=np.float64)
         state.g = to_gridfunc(self.sources[counter - 1], self.Ufes)
-        state.set_z(self.noise.draw(state.u_true, state.level, counter))
+        state.set_z(self.noise.draw(state.u_true, state.noise_level, counter))
 
     # f(q, z) = -div(q grad z) is affine in q: sigma = 0 and L = 0 exactly.
     # (A2) holds only formally: the pairing int q grad(z) grad(q) with q in
@@ -107,8 +107,11 @@ class DarcyProblem(Problem):
     L = 0.0
     C_scale = 1.0
 
-    def coupling_kernel(self, z, v):
-        return Grad(z) * Grad(v)
+    def coupling(self, q, z, s):
+        return q * Grad(z) * Grad(s)
+
+    def coupling_adjoint(self, q, z, s):
+        return Grad(z) * Grad(s)
 
     def forms(self, state):
         dt = self.dt

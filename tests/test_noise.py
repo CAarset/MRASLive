@@ -2,11 +2,11 @@
 
 A draw is z = gf + e where e is a Gaussian field in U_h with
 
-* exact relative amplitude:  ||e||_L2 == level * ||gf||_L2,
-* FEM white-noise covariance: E[e e^T] == (level^2 ||gf||^2 / d) M^{-1},
+* exact relative amplitude:  ||e||_L2 == noise_level * ||gf||_L2,
+* FEM white-noise covariance: E[e e^T] == (noise_level^2 ||gf||^2 / d) M^{-1},
   i.e. E[(e, phi)(e, psi)] = (phi, psi)_L2 for all phi, psi in U_h (the discrete
   analogue of Gaussian white noise),
-* order-independent seeding: the stream is fixed by (seed, level, counter) alone.
+* order-independent seeding: the stream is fixed by (seed, noise_level, counter) alone.
 """
 
 import numpy as np
@@ -62,12 +62,12 @@ def test_draw_is_gridfunction_in_space(coarse_fes, base_field):
     assert z.space is coarse_fes
 
 
-@pytest.mark.parametrize("level", [0.01, 0.05, 0.2])
-def test_level_is_exact(coarse_fes, unit_square, base_field, level):
+@pytest.mark.parametrize("noise_level", [0.01, 0.05, 0.2])
+def test_level_is_exact(coarse_fes, unit_square, base_field, noise_level):
     noise = GaussianFEMNoise(coarse_fes, seed=1)
-    z = noise.draw(base_field, level, 3)
+    z = noise.draw(base_field, noise_level, 3)
     e = z - base_field
-    assert l2norm(e, unit_square) == pytest.approx(level * l2norm(base_field, unit_square),
+    assert l2norm(e, unit_square) == pytest.approx(noise_level * l2norm(base_field, unit_square),
                                                    rel=1e-10)
 
 
@@ -115,21 +115,21 @@ def test_white_noise_covariance_and_mean(unit_square, coarse_fes, base_field):
     """Known-answer check of the defining white-noise identity.
 
     With d free dofs, exact normalization gives
-    E[e e^T] = level^2 ||gf||^2 M^{-1} / d  and  E[e] = 0.
+    E[e e^T] = noise_level^2 ||gf||^2 M^{-1} / d  and  E[e] = 0.
     """
-    level = 0.1
+    noise_level = 0.1
     noise = GaussianFEMNoise(coarse_fes, seed=11)
     idx = np.flatnonzero(np.fromiter(coarse_fes.FreeDofs(), dtype=bool))
     M = _dense_mass(coarse_fes)
     Minv = np.linalg.inv(M)
-    target = level ** 2 * l2norm(base_field, unit_square) ** 2 / idx.size * Minv
+    target = noise_level ** 2 * l2norm(base_field, unit_square) ** 2 / idx.size * Minv
 
     n = 3000
     acc = np.zeros((idx.size, idx.size))
     mean = np.zeros(idx.size)
     basev = np.array(base_field.vec)[idx]
     for k in range(1, n + 1):
-        v = np.array(noise.draw(base_field, level, k).vec)[idx] - basev
+        v = np.array(noise.draw(base_field, noise_level, k).vec)[idx] - basev
         acc += np.outer(v, v)
         mean += v
     cov = acc / n
@@ -138,7 +138,7 @@ def test_white_noise_covariance_and_mean(unit_square, coarse_fes, base_field):
     rel = np.linalg.norm(cov - target) / np.linalg.norm(target)
     assert rel < 0.12
     # mean must be zero well inside Monte-Carlo error: E||mean||_M = scale/sqrt(n)
-    scale = level * l2norm(base_field, unit_square)
+    scale = noise_level * l2norm(base_field, unit_square)
     m_M = np.sqrt(float(mean @ (M @ mean)))
     assert m_M < 0.1 * scale  # ~6 sigma
 

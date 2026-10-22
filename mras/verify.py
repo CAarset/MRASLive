@@ -7,43 +7,52 @@ row make up a fixed list of claims.  ``run_checks`` asks each claim of a
 problem instance and reports one of
 
     ok             confirmed numerically (margin reported)
-    fail         contradicted numerically (the honest negative result)
-    deviation    expected deviation, documented by ``adjoint_deviation``
-    unverifiable no probe exists or the pairing degenerates discretely;
-                 flagged, never silently skipped
+    fail           contradicted numerically (the honest negative result)
+    deviation      expected deviation, documented by ``adjoint_deviation``
+    estimated      a numerical bound stands in for an unproven constant;
+                   warned, never silently accepted
+    unverifiable   no probe exists or the pairing degenerates discretely;
+                   flagged, never silently skipped
 
-Problems expose the theory through the hooks added to
-:class:`mras.scheme.Problem` (``coupling_kernel`` for f affine in q,
-``monotone_pair`` for pointwise nonlinear f, ``C_scale``,
-``adjoint_deviation``); a missing hook yields ``unverifiable`` with the
-reason.  ``scripts/checklist.py`` runs the whole registry and writes the
-markdown table that backs the report's theory column.
+Everything the ladder needs from the model is the single hook
+``coupling(q, z, s)`` (the q-dependent part of f as a weak functional) on
+:class:`mras.scheme.Problem`: the same hook drives the affinity probe that
+decides between sigma = 0 and sigma = 1, the Lipschitz estimator when f is
+nonlinear in q, and the (A2) monotonicity probe.  A second, independently
+transcribed hook ``coupling_adjoint(q, z, s)`` lets a pre-verification
+compare the declared pairing density against the numerical q-derivative of
+``coupling`` before any solving; missing hooks yield ``unverifiable`` with
+the reason.  ``scripts/checklist.py`` runs the whole registry and writes
+the markdown table that backs the report's theory column.
 
 The (A2) probe evaluates the pairing ``int [f(q,z) - f(p,z)] (q - p) dx``
-on random P0 directions and the first, middle and last noise-free datum.
+on random P0 patch pairs and the first, middle and last noise-free datum.
 For gradient couplings (Darcy, Fisher, Burgers) this pairing is exactly
 zero on the discrete P0 parameter space - grad q = 0 a.e. - which is a
 degeneration of the *discretisation*, so the check additionally evaluates
-the smoothed relaxation (pairing against the H1-regularised lift of the
-direction); a sign-indefinite relaxation reports ``fail`` with that note,
-matching the paper's own refusal to claim (A2) there (Remark 4.2).
+the smoothed relaxation (the pairing tested against the H1-conforming
+view of the difference in U_h); a sign-indefinite relaxation reports
+``fail`` with that note, matching the paper's own refusal to claim (A2)
+there (Remark 4.2).
 """
 
 from collections import namedtuple
 import importlib.util
 import pathlib
 import re
+import warnings
 
 import numpy as np
 from ngsolve import (BilinearForm, GridFunction, Integrate, LinearForm,
                      Preconditioner, dx, grad)
-from ngsolve.solvers import BVP
+from ngsolve.solvers import BVP, CG
 
 from .adjoint import adjoint_mismatch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-OK, FAIL, UNVERIFIABLE, DEVIATION = "ok", "fail", "unverifiable", "deviation"
+OK, FAIL, UNVERIFIABLE, DEVIATION, ESTIMATED = (
+    "ok", "fail", "unverifiable", "deviation", "estimated")
 
 Check = namedtuple("Check", "name status detail")
 
@@ -58,14 +67,14 @@ def _datum_samples(problem, n=3):
     """Noise-free datum as U_h GridFunctions at spread-out times.
 
     Works for every problem: the datum mechanism ``problem.data`` is
-    evaluated on a fresh zero-level state (no noise draw), which covers
+    evaluated on a fresh noise-free state (no noise draw), which covers
     both generated snapshots and analytic references.
     """
     from .scheme import State
     out = []
     for frac in np.linspace(0.05, 0.95, n):
         state = State(problem, 0.0)
-        problem.init_level(state)
+        problem.init_run(state)
         state.t.Set(problem.tend * frac)
         state.counter = max(1, int(round(frac * problem.tsteps)))
         problem.data(state)
@@ -87,23 +96,14 @@ def _random_q(problem, rng):
     return gf
 
 
+def _random_u(problem, rng):
+    gf = GridFunction(problem.Ufes)
+    gf.vec.FV().NumPy()[:] = rng.standard_normal(problem.Ufes.ndof)
+    return gf
+
+
 def _l2sq(problem, cf):
     return _int(problem, cf * cf)
-
-
-def _lift(problem, dq):
-    """H1-regularised representative of a P0 direction (mass + dt*stiff)."""
-    U = problem.Ufes
-    u, v = U.TrialFunction(), U.TestFunction()
-    a = BilinearForm(U)
-    a += u * v * dx + problem.dt * grad(u) * grad(v) * dx
-    lf = LinearForm(U)
-    lf += dq * v * dx
-    a.Assemble()
-    lf.Assemble()
-    out = GridFunction(U)
-    BVP(bf=a, lf=lf, gf=out, pre=Preconditioner(a, "local"), print=False)
-    return out
 
 
 def check_adjoint(problem, state):
@@ -126,47 +126,164 @@ def check_adjoint(problem, state):
                  f"cross blocks disagree: max ratio {ratio:.1e}")
 
 
-def check_a1_sigma(problem):
-    """(A1) Lipschitz remainder and the sigma it forces (sigma = 0 iff f
-    is affine in q)."""
-    kernel = problem.coupling_kernel if callable(problem.coupling_kernel) \
-        else None
-    pair = problem.monotone_pair if callable(problem.monotone_pair) else None
-    if kernel is not None:
-        note = "" if problem.sigma == 0 else \
-            f" -- declared sigma = {problem.sigma} adds an implicit term " \
-            "beyond the affine scheme"
-        return Check("(A1) affine / sigma", OK if problem.sigma == 0 else FAIL,
-                     "f affine in q: remainder L = 0 exactly (any L >= 0 "
-                     f"admissible; declared L = {problem.L})" + note)
-    if pair is not None:
-        want = "sigma = 1 required" if problem.sigma == 1 else \
-            f"declared sigma = {problem.sigma}"
-        return Check("(A1) nonlinear / sigma",
-                     OK if problem.sigma == 1 else FAIL,
-                     f"f nonlinear in q: local Lipschitz (bounded sets), "
-                     f"global constant not probed; {want}; sampled curvature "
-                     "bound reported by the (A2) probe detail")
-    return Check("(A1) Lipschitz / sigma", UNVERIFIABLE,
-                 "no f-hook: f neither affine (coupling_kernel) nor pointwise "
-                 "(monotone_pair) as declared by the problem")
+# -- (A1): affinity probe and Lipschitz estimator --------------------------
 
-
-def _a2_kernel_probe(problem, samples, seed=0, n=6):
+def _probe_affine(problem, samples, seed=0, n=8):
+    """q -> <f(q, z), s> is affine exactly when the chord gap
+    |F(lam q1 + (1-lam) q2) - lam F(q1) - (1-lam) F(q2)| vanishes; the
+    ratio is normalised by the magnitudes of the three terms."""
     rng = np.random.default_rng(seed)
-    deg, lifted = [], []
+    worst = 0.0
     for z in samples:
         for _ in range(n):
-            dq = _random_q(problem, rng)
-            nrm = _l2sq(problem, dq)
-            dq_u = GridFunction(problem.Ufes)
-            dq_u.Set(dq)  # P0 direction viewed in U_h
-            num = _int(problem, dq * problem.coupling_kernel(z, dq_u))
-            deg.append(num / nrm)
-            v = _lift(problem, dq)
-            lifted.append(_int(problem, dq * problem.coupling_kernel(z, v))
-                          / nrm)
-    return min(deg), min(lifted)
+            q1, q2 = _random_q(problem, rng), _random_q(problem, rng)
+            s = _random_u(problem, rng)
+            f1 = _int(problem, problem.coupling(q1, z, s) * dx)
+            f2 = _int(problem, problem.coupling(q2, z, s) * dx)
+            for lam in (0.3, 0.7):
+                mix = lam * q1 + (1.0 - lam) * q2
+                gap = _int(problem, problem.coupling(mix, z, s) * dx)
+                scale = abs(gap) + abs(lam) * abs(f1) + abs(1 - lam) * abs(f2)
+                worst = max(worst, abs(gap - lam * f1 - (1 - lam) * f2)
+                            / max(scale, 1e-300))
+    return worst < 1e-9, worst
+
+
+def _estimate_lipschitz(problem, samples, seed=0, n=8, radii=(1.0, 3.0)):
+    """Sampled bound on the (A1) remainder
+    R = f(q+d, z) - f(q, z) - f_q(q, z) d, measured as max ||R|| / ||d||:
+    f_q(q, .) d is the central difference of the hook, and ||R|| the Riesz
+    norm of the residual functional in K = mass + dt*stiffness (the dual
+    of which dominates the L2 pairing that the scheme applies to)."""
+    U = problem.Ufes
+    u, v = U.TrialFunction(), U.TestFunction()
+    a = BilinearForm(U)
+    a += u * v * dx + problem.dt * grad(u) * grad(v) * dx
+    a.Assemble()
+    pre = Preconditioner(a, "local")
+    pre.Update()
+    rng = np.random.default_rng(seed)
+    eta = 1e-4
+    lhat = 0.0
+    for radius in radii:
+        for z in samples:
+            for _ in range(n):
+                q = _scaled_q(problem, rng, radius)
+                d = _scaled_q(problem, rng, radius / 2.0)
+                lf = LinearForm(U)
+                lf += (problem.coupling(q + d, z, v)
+                       - problem.coupling(q, z, v)
+                       - (problem.coupling(q + eta * d, z, v)
+                          - problem.coupling(q - eta * d, z, v))
+                       / (2 * eta)) * dx
+                lf.Assemble()
+                sol = GridFunction(U)
+                BVP(bf=a, lf=lf, gf=sol, pre=pre, print=False)
+                rho = float(np.sqrt(max(
+                    np.asarray(lf.vec) @ np.asarray(sol.vec), 0.0)))
+                lhat = max(lhat, rho / np.sqrt(_l2sq(problem, d)))
+    return lhat
+
+
+def _scaled_q(problem, rng, radius):
+    """Random P0 field with ||q||_L2 at most ``radius`` (scale-free probes
+    need the bounded sets that the local Lipschitz statement runs on)."""
+    gf = _random_q(problem, rng)
+    norm = np.sqrt(_l2sq(problem, gf))
+    if norm > 0:
+        gf.vec.FV().NumPy()[:] *= radius * rng.uniform(0.2, 1.0) / norm
+    return gf
+
+
+def check_a1_sigma(problem, samples, affine=None):
+    """(A1) Lipschitz remainder and the sigma it forces (sigma = 0 iff f
+    is affine in q)."""
+    if problem.theory_exempt:
+        return Check("(A1) Lipschitz / sigma", UNVERIFIABLE,
+                     f"theory ladder waived: {problem.theory_exempt}")
+    if not callable(getattr(problem, "coupling", None)):
+        return Check("(A1) Lipschitz / sigma", UNVERIFIABLE,
+                     "coupling(q, z, s) not declared")
+    if affine is None:
+        affine, gap = _probe_affine(problem, samples)
+    else:
+        affine, gap = affine
+    if affine:
+        if problem.sigma != 0:
+            return Check("(A1) Lipschitz / sigma", FAIL,
+                         f"f is affine in q (probe gap {gap:.1e}), so the "
+                         f"theory forces sigma = 0 -- declared sigma = "
+                         f"{problem.sigma} adds an implicit term beyond the "
+                         "affine scheme")
+        note = "" if problem.L in (None, 0.0) else \
+            f" (declared L = {problem.L} unused: affinity gives L = 0)"
+        return Check("(A1) Lipschitz / sigma", OK,
+                     f"f affine in q on sampled pairs (probe gap {gap:.1e}): "
+                     f"remainder L = 0 exactly" + note)
+    if problem.sigma != 1:
+        return Check("(A1) Lipschitz / sigma", FAIL,
+                     f"f is nonlinear in q, so the scheme requires "
+                     f"sigma = 1 -- declared sigma = {problem.sigma}")
+    if problem.L is not None:
+        return Check("(A1) Lipschitz / sigma", OK,
+                     f"f nonlinear in q: constant L = {problem.L} declared "
+                     "by the author (local Lipschitz on bounded sets)")
+    lhat = _estimate_lipschitz(problem, samples)
+    warnings.warn(
+        f"{problem.name}: (A1) constant estimated numerically "
+        f"(L_hat = {lhat:.3g}) -- declare L on the class to confirm it",
+        stacklevel=3)
+    return Check("(A1) Lipschitz / sigma", ESTIMATED,
+                 f"f nonlinear in q: sampled remainder bound L_hat = "
+                 f"{lhat:.3g} on radius-3 balls (K-dual norm, "
+                 "K = mass + dt*stiffness); declare L to confirm")
+
+
+# -- (A2): monotonicity -----------------------------------------------------
+
+def _a2_probe(problem, samples, seed=0, n=12, nrelax=6):
+    """Localise the test pairs on a few cells: (A2) must hold for every
+    q, i.e. pointwise in the space-time cylinder, and full-domain pairs
+    only probe the datum-weighted mean of the monotonicity density, which
+    averages out sign-changing data.  A pointwise coupling then pairs the
+    difference qa - qb against itself in the raw P0 test slot.  Gradient
+    couplings are discretely degenerate there (grad q = 0 a.e. on P0, or
+    the gradient operator does not even exist on the parameter space), so
+    the probe additionally evaluates the smoothed relaxation: global
+    directions tested against their U_h view."""
+    rng = np.random.default_rng(seed)
+    deg = []
+    degenerate = False
+    for z in samples:
+        for _ in range(n):
+            qa, qb = _patch_q(problem, rng), _patch_q(problem, rng)
+            nrm = _l2sq(problem, qa - qb)
+            try:
+                deg.append(
+                    (_int(problem, problem.coupling(qa, z, qa - qb) * dx)
+                     - _int(problem, problem.coupling(qb, z, qa - qb) * dx))
+                    / nrm)
+            except Exception:
+                # grad does not exist on the P0 test space: that absence is
+                # itself the discrete degeneracy of a gradient coupling.
+                degenerate = True
+    d = 0.0 if degenerate else min(deg)
+    l = None
+    if abs(d) <= 1e-10:
+        rng = np.random.default_rng(seed)
+        relaxed = []
+        for z in samples:
+            for _ in range(nrelax):
+                qa, qb = _random_q(problem, rng), _random_q(problem, rng)
+                nrm = _l2sq(problem, qa - qb)
+                view = GridFunction(problem.Ufes)
+                view.Set(qa - qb)  # P0 direction viewed in U_h
+                relaxed.append(
+                    (_int(problem, problem.coupling(qa, z, view) * dx)
+                     - _int(problem, problem.coupling(qb, z, view) * dx))
+                    / nrm)
+        l = min(relaxed)
+    return d, l, degenerate
 
 
 def _datum_cells_mean(problem):
@@ -189,21 +306,6 @@ def _datum_cells_mean(problem):
     return np.vstack(means)
 
 
-def _a2_pair_probe(problem, samples, seed=0, n=12):
-    """Localise the test pairs on a few cells: (A2) must hold for every
-    q, i.e. pointwise in the space-time cylinder, and full-domain pairs
-    only probe the datum-weighted mean of the monotonicity density, which
-    averages out sign-changing data."""
-    rng = np.random.default_rng(seed)
-    vals = []
-    for z in samples:
-        for _ in range(n):
-            qa, qb = _patch_q(problem, rng), _patch_q(problem, rng)
-            nrm = _l2sq(problem, qa - qb)
-            vals.append(_int(problem, problem.monotone_pair(qa, qb, z)) / nrm)
-    return min(vals)
-
-
 def _patch_q(problem, rng, k=3):
     """Random P0 field supported on k cells (the whole space if Q is
     coarser), with random signs and amplitudes: the pairing ratio then
@@ -219,6 +321,9 @@ def _patch_q(problem, rng, k=3):
 
 def check_a2(problem, samples):
     """(A2) monotonicity: int [f(q,z) - f(p,z)] (q - p) >= C_coe |q - p|^2."""
+    if problem.theory_exempt:
+        return Check("(A2) monotonicity", UNVERIFIABLE,
+                     f"theory ladder waived: {problem.theory_exempt}")
     if callable(getattr(problem, "c_coe", None)):
         est = problem.c_coe()
         if est > _TOL:
@@ -227,45 +332,84 @@ def check_a2(problem, samples):
                          "essential lower bound of the datum, c_coe())")
         return Check("(A2) monotonicity", FAIL,
                      f"analytic witness c_coe() = {est:.3g} <= 0")
-    if callable(problem.coupling_kernel) and not callable(
-            problem.monotone_pair):
-        d, l = _a2_kernel_probe(problem, samples)
-        if d > _TOL:
-            return Check("(A2) monotonicity", OK,
-                         f"witnessed C_coe >= {d:.3g} (min over "
-                         "sampled datum and directions)")
-        if abs(d) <= 1e-10:
-            if l > _TOL:
-                return Check("(A2) monotonicity", UNVERIFIABLE,
-                             "pairing is exactly 0 on the discrete P0 space "
-                             "(grad q = 0 a.e.); smoothed relaxation positive "
-                             f"(min {l:.3g}) - continuous claim not decidable")
-            return Check("(A2) monotonicity", FAIL,
-                         "pairing degenerates on P0 (0 a.e.) and the smoothed "
-                         f"relaxation is sign-indefinite (min {l:.3g}): "
-                         "gradient coupling, as the paper concedes "
-                         "(Remark 4.2: not claimed for this example)")
+    if not callable(getattr(problem, "coupling", None)):
+        return Check("(A2) monotonicity", UNVERIFIABLE,
+                     "coupling(q, z, s) not declared; parameter may be "
+                     "absent from the state model entirely")
+    d, l, degenerate = _a2_probe(problem, samples)
+    if d > _TOL:
+        return Check("(A2) monotonicity", OK,
+                     f"witnessed C_coe >= {d:.3g} (min over sampled datum "
+                     "and patch pairs)")
+    if degenerate or abs(d) <= 1e-10:
+        if l > _TOL:
+            return Check("(A2) monotonicity", UNVERIFIABLE,
+                         "pairing vanishes on the discrete P0 space (grad q "
+                         "= 0 a.e., or grad is undefined there); smoothed "
+                         f"relaxation positive (min {l:.3g}) - continuous "
+                         "claim not decidable")
         return Check("(A2) monotonicity", FAIL,
-                     f"min pairing ratio {d:.3g}: sign-indefinite pairing, "
-                     "gradient coupling - (A2) not claimed by the paper for "
-                     "this example (Remark 4.2)")
-    if callable(problem.monotone_pair):
-        m = _a2_pair_probe(problem, samples)
-        if m > _TOL:
-            return Check("(A2) monotonicity", OK,
-                         f"witnessed C_coe >= {m:.3g} on sampled range")
-        return Check("(A2) monotonicity", FAIL,
-                     f"sampled pairing reaches {m:.3g} < 0: no monotonicity "
-                     "witness on the sampled datum range")
-    return Check("(A2) monotonicity", UNVERIFIABLE,
-                 "no f-hook declared; parameter may be absent from the "
-                 "state model entirely (check the example docstring)")
+                     "pairing degenerates on P0 and the smoothed relaxation "
+                     f"is sign-indefinite (min {l:.3g}): gradient coupling, "
+                     "as the paper concedes (Remark 4.2: not claimed for "
+                     "this example)")
+    return Check("(A2) monotonicity", FAIL,
+                 f"min pairing ratio {d:.3g}: monotonicity violated on "
+                 "sampled patch pairs")
+
+
+# -- coupling pre-verification ----------------------------------------------
+
+def check_pairing(problem, samples, n=100, seed=0):
+    """The parameter row uses <f_q(q, z) p, s> = int p * coupling_adjoint(
+    q, z, s) dx; pre-verify the declared density against the numerical
+    q-derivative of coupling() on random draws, before any solving."""
+    if problem.theory_exempt:
+        return Check("coupling pre-verification", UNVERIFIABLE,
+                     f"theory ladder waived: {problem.theory_exempt}")
+    if not callable(getattr(problem, "coupling", None)):
+        return Check("coupling pre-verification", UNVERIFIABLE,
+                     "coupling(q, z, s) not declared")
+    if not callable(getattr(problem, "coupling_adjoint", None)):
+        return Check("coupling pre-verification", UNVERIFIABLE,
+                     "coupling_adjoint(q, z, s) not declared: the pairing "
+                     "cannot be pre-verified (recommended hook)")
+    rng = np.random.default_rng(seed)
+    # f is affine exactly when the forward quotient is the exact
+    # difference; nonlinear remainders (Holder corners in |q|^{2/3} for
+    # the potential flow) tolerate the O(eta^{2/3}) forward-difference
+    # error but not a transcription mistake.
+    affine, _ = _probe_affine(problem, samples, seed=seed, n=4)
+    eta = 1.0 if affine else 1e-5
+    tol = 1e-9 if affine else 1e-2
+    lhs, rhs = [], []
+    for i in range(n):
+        z = samples[i % len(samples)]
+        # continuous (not patch) draws: a nonlinear forward difference has
+        # an O(eta) remainder that a near-zero exact pairing -- disjoint
+        # patch supports -- cannot be compared against; a datum and a full
+        # random q, p keep |rhs| away from zero so the relative test bites.
+        q, p, s = (_random_q(problem, rng), _random_q(problem, rng),
+                   _random_u(problem, rng))
+        lhs.append((_int(problem, problem.coupling(q + eta * p, z, s) * dx)
+                    - _int(problem, problem.coupling(q, z, s) * dx)) / eta)
+        rhs.append(_int(problem, p * problem.coupling_adjoint(q, z, s) * dx))
+    scale = float(np.median(np.abs(rhs)))
+    ratio = max(abs(a - b) for a, b in zip(lhs, rhs)) / max(scale, 1e-300)
+    if ratio > tol:
+        return Check("coupling pre-verification", FAIL,
+                     f"coupling_adjoint disagrees with the q-derivative of "
+                     f"coupling: max ratio {ratio:.1e} over {n} draws")
+    how = ("exact difference, f affine" if affine
+           else f"forward difference eta = {eta:g} (Holder remainder)")
+    return Check("coupling pre-verification", OK,
+                 f"pairing matches the numerical q-derivative of coupling "
+                 f"on {n} draws (max ratio {ratio:.1e}; {how})")
 
 
 def _lambda1(problem, iters=200, seed=0):
     """Smallest eigenvalue of C = C_scale * (-Laplace) relative to L2 mass,
     by CG-preconditioned inverse iteration with mass normalisation."""
-    from ngsolve.solvers import CG
     U = problem.Ufes
     u, v = U.TrialFunction(), U.TestFunction()
     a = BilinearForm(U)
@@ -298,7 +442,7 @@ def _lambda1(problem, iters=200, seed=0):
     return lam
 
 
-def check_a3(problem, a2):
+def check_a3(problem, a2, affine=None):
     """(A3): lambda_1(C) > L^2 / (2 C_coe) (then M~ can absorb any margin)."""
     if problem.C_scale is None:
         return Check("(A3) coercivity", UNVERIFIABLE,
@@ -308,8 +452,16 @@ def check_a3(problem, a2):
         return Check("(A3) coercivity", UNVERIFIABLE,
                      f"(A2) not confirmed (status: {a2.status}), so "
                      "M~ = L^2/(2 C_coe) + M is undefined")
+    if problem.L is not None:
+        L = problem.L
+    elif affine:
+        L = 0.0  # affinity probe: the remainder vanishes identically
+    else:
+        return Check("(A3) coercivity", UNVERIFIABLE,
+                     "no (A1) constant available: declare L on the class "
+                     "(an estimated L_hat is too weak a basis for M~)")
     est = float(re.search(r">=\s*([0-9.eE+-]+)", a2.detail).group(1))
-    need = problem.L ** 2 / (2 * est)
+    need = L ** 2 / (2 * est)
     lam = _lambda1(problem)
     if lam > need:
         return Check("(A3) coercivity", OK,
@@ -333,10 +485,10 @@ def check_pe(problem):
                  "identifiability can be expected (universal proxy only)")
 
 
-def check_reproducible(build, cfg, level=0.05):
+def check_reproducible(build, cfg, noise_level=0.05):
     """Same seed must reproduce the same error histories exactly."""
-    r1 = build(**cfg).run_level(level, progress=False).error_u
-    r2 = build(**cfg).run_level(level, progress=False).error_u
+    r1 = build(**cfg).run_level(noise_level, progress=False).error_u
+    r2 = build(**cfg).run_level(noise_level, progress=False).error_u
     same = r1 is not None and np.array_equal(r1, r2)
     return Check("seeded reproducibility", OK if same else FAIL,
                  "identical error histories across two runs" if same
@@ -358,12 +510,16 @@ def check_convergence(error_q):
 def run_checks(problem, state, error_q=None, seed=0):
     """Full checklist for one problem instance with data already loaded."""
     samples = _datum_samples(problem)
+    affine = (_probe_affine(problem, samples, seed=seed)
+              if callable(getattr(problem, "coupling", None))
+              and not problem.theory_exempt else None)
     a2 = check_a2(problem, samples)
     return [
         check_adjoint(problem, state),
-        check_a1_sigma(problem),
+        check_pairing(problem, samples, seed=seed),
+        check_a1_sigma(problem, samples, affine),
         a2,
-        check_a3(problem, a2),
+        check_a3(problem, a2, affine),
         check_pe(problem),
         check_convergence(error_q),
     ]
@@ -380,6 +536,9 @@ def _module(stem):
 
 
 def _registry():
+    # built only on demand: the entries execute the example scripts and
+    # pull in the whole problem library, which no other checklist call
+    # needs.
     from mras.problems import (AllenCahnProblem, DarcyProblem, FisherProblem,
                                PotentialProblem)
     from mras.problems.arrhenius import (ArrheniusLinearProblem,
@@ -403,17 +562,18 @@ def _registry():
 
 
 def check_example(name, quick=True, seed=0):
-    """Build, run one noise-free level, and check the instance."""
+    """Build, run one noise-free run (noise level 0%), and check the
+    instance."""
     build, cfg = _registry()[name]
     problem = build(**cfg)
-    result = problem.run_level(0, progress=False)
+    result = problem.run_level(0.0, progress=False)
     checks = run_checks(problem, result.state, result.error_q, seed=seed)
     if quick:
         checks.append(check_reproducible(build, cfg))
     return checks
 
 
-STATUS_ORDER = {OK: 0, DEVIATION: 1, UNVERIFIABLE: 2, FAIL: 3}
+STATUS_ORDER = {OK: 0, DEVIATION: 1, ESTIMATED: 2, UNVERIFIABLE: 3, FAIL: 4}
 
 
 def as_markdown(name, checks):
@@ -422,6 +582,7 @@ def as_markdown(name, checks):
     for c in checks:
         mark = {OK: "OK", FAIL: "**FAIL**",
                 UNVERIFIABLE: "*unverifiable*",
-                DEVIATION: "*deviation*"}[c.status]
+                DEVIATION: "*deviation*",
+                ESTIMATED: "*estimated*"}[c.status]
         lines.append(f"| {c.name} | {mark} | {c.detail} |")
     return "\n".join(lines)

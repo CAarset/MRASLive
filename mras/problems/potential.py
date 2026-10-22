@@ -83,8 +83,8 @@ class PotentialProblem(Problem):
     only one with a trace on the boundary.
 
     The data z is drawn per step from seeded Gaussian FEM noise keyed by
-    (seed, level, counter).  Each noise level starts from the same clean
-    initial state; nothing carries over between levels.
+    (seed, noise_level, counter).  Each noise level starts from the same
+    clean initial state; nothing carries over between noise levels.
     """
 
     name = "potential"
@@ -93,7 +93,6 @@ class PotentialProblem(Problem):
     incremental = True
     stop_margin = 2.0
     sigma = 1.0
-    L = 1.0
 
     def __init__(self, h=0.1, dt=1e-3, tend=5.0, k_u=3, seed=2):
         super().__init__(potential(maxh=h, order_u=k_u), dt=dt, tend=tend,
@@ -111,7 +110,7 @@ class PotentialProblem(Problem):
                           + float(Integrate(self.q_true ** 3, self.mesh)) ** (2 / 9))
 
     # -- driver hooks --------------------------------------------------------
-    def init_level(self, state):
+    def init_run(self, state):
         # Self-contained fresh start: the reference state at t = 0 (decay
         # factor 1) doubles as the initial state estimate.
         self._u_exact.Set(self.u_wot + OFFSET)
@@ -123,7 +122,7 @@ class PotentialProblem(Problem):
         decay = (DECAY_T - (state.t.Get() + self.dt)) / DECAY_T
         self._u_exact.Set(self.u_wot * decay + OFFSET)
         state.u_true.vec.data = self._u_exact.vec.Copy()
-        state.set_z(self.noise.draw(self._u_exact, state.level, state.counter))
+        state.set_z(self.noise.draw(self._u_exact, state.noise_level, state.counter))
         state.ut = self._ut
 
     def c_value(self, gfq):
@@ -134,17 +133,20 @@ class PotentialProblem(Problem):
     adjoint_deviation = ("paper-literal c~ = 0 linearisation of the discrete "
                          "multiplier, DEVIATIONS.md")
 
-    def monotone_pair(self, qa, qb, z):
-        """[f(qa, z) - f(qb, z)] (qa - qb) for f(q, z) = phi(q) z,
-        phi(q) = q + 3/5 q |q|^{2/3} (phi' = 1 + |q|^{2/3} >= 1)."""
-        def phi(q):
-            return q + 0.6 * q * sqrt(q * q) ** (2 / 3)
-        return (phi(qa) - phi(qb)) * (qa - qb) * z
+    def coupling(self, q, z, s):
+        """<f(q, z), s> = int phi(q) z s dx for f(q, z) = phi(q) z,
+        phi(q) = q + 3/5 q |q|^{2/3}: monotone wherever z >= 0 (the
+        measured (A2) bound uses the datum's positive lower bound)."""
+        return (q + 0.6 * q * sqrt(q * q) ** (2 / 3)) * z * s
+
+    def coupling_adjoint(self, q, z, s):
+        """phi'(q) = 1 + |q|^{2/3}, transcribed independently."""
+        return (1 + sqrt(q * q) ** (2 / 3)) * z * s
 
     def forms(self, state):
         dt, sigma = self.dt, self.sigma
         gfq, z, z_old, zt, ut = state.gfq, state.z, state.z_old, state.zt, state.ut
-        noisy = state.level > 0
+        noisy = state.noise_level > 0
         absq = sqrt(gfq * gfq)
         absq23 = absq ** (2 / 3)
         qex = self.q_true

@@ -42,7 +42,6 @@ class AllenCahnProblem(Problem):
     incremental = True
     stop_margin = 2.0
     sigma = 1.0
-    L = 1.0
 
     def __init__(self, h=0.1, dt=1e-3, tend=5.0, k_u=3, seed=0):
         super().__init__(allen_cahn(maxh=h, order_u=k_u), dt=dt, tend=tend,
@@ -60,7 +59,7 @@ class AllenCahnProblem(Problem):
                         + float(Integrate(self.q_true ** 3, self.mesh)) ** (2 / 9))
 
     # -- driver hooks --------------------------------------------------------
-    def init_level(self, state):
+    def init_run(self, state):
         # Self-contained fresh start: the reference state at t = 0 (decay
         # factor 1) is both the initial estimate and the time-zero reference.
         self._u_exact.Set(self.u_wot + OFFSET)
@@ -72,7 +71,7 @@ class AllenCahnProblem(Problem):
         decay = (DECAY_T - (state.t.Get() + self.dt)) / DECAY_T
         self._u_exact.Set(self.u_wot * decay + OFFSET)
         state.u_true.vec.data = self._u_exact.vec.Copy()
-        state.set_z(self.noise.draw(self._u_exact, state.level, state.counter))
+        state.set_z(self.noise.draw(self._u_exact, state.noise_level, state.counter))
         state.ut = self._ut
 
     def c_value(self, gfq):
@@ -82,21 +81,24 @@ class AllenCahnProblem(Problem):
     adjoint_deviation = ("paper-literal c~ = 0 linearisation of the discrete "
                          "multiplier, DEVIATIONS.md")
 
-    def monotone_pair(self, qa, qb, z):
-        """[f(qa, z) - f(qb, z)] (qa - qb) for f(q, z) = q z^3 +
-        3/5 q |q|^{2/3} z: monotone wherever z >= 0.  The datum u^dagger =
-        u_wot (DECAY_T - t) / DECAY_T + OFFSET has a positive a.e. lower
-        bound (its nodal P3 values ring below zero at sine extrema, but the
-        cell means stay >= 1 - |u_wot| > 0), so (A2) holds on the actual
-        space-time range and the witness is a lower bound on the datum."""
-        def phi(q):
-            return q * z ** 3 + 0.6 * q * sqrt(q * q) ** (2 / 3) * z
-        return (phi(qa) - phi(qb)) * (qa - qb)
+    def coupling(self, q, z, s):
+        """<f(q, z), s> = int phi(q, z) s dx for f(q, z) = q z^3 +
+        3/5 q |q|^{2/3} z: monotone in q wherever z >= 0.  The datum
+        u^dagger = u_wot (DECAY_T - t) / DECAY_T + OFFSET has a positive
+        a.e. lower bound (its nodal P3 values ring below zero at sine
+        extrema, but the cell means stay >= 1 - |u_wot| > 0), so (A2) holds
+        on the actual space-time range."""
+        return (q * z ** 3 + 0.6 * q * sqrt(q * q) ** (2 / 3) * z) * s
+
+    def coupling_adjoint(self, q, z, s):
+        """d/dq [q z^3 + 3/5 q |q|^{2/3} z] = (z^3 + |q|^{2/3} z),
+        transcribed independently."""
+        return (z ** 3 + sqrt(q * q) ** (2 / 3) * z) * s
 
     def forms(self, state):
         dt, sigma = self.dt, self.sigma
         gfq, z, z_old, zt, ut = state.gfq, state.z, state.z_old, state.zt, state.ut
-        noisy = state.level > 0
+        noisy = state.noise_level > 0
         absq = sqrt(gfq * gfq)
         absq23 = absq ** (2 / 3)
         qex = self.q_true

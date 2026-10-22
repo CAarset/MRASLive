@@ -1,6 +1,7 @@
 """The MRAS time loop: data feed, joint (u, q) step, error tracking."""
 
 import time
+import warnings
 from collections import namedtuple
 
 import numpy as np
@@ -25,9 +26,9 @@ class DataStep(namedtuple("DataStep", "fes u v u_prev t g dt")):
 class State:
     """Mutable objects shared by the driver and a problem's hooks."""
 
-    def __init__(self, problem, level):
+    def __init__(self, problem, noise_level):
         self.problem = problem
-        self.level = level
+        self.noise_level = noise_level
         self.mesh = problem.mesh
         self.Ufes, self.Qfes = problem.Ufes, problem.Qfes
         self.X = problem.X
@@ -51,7 +52,7 @@ class State:
     def set_z(self, z):
         """Copy a datum into the persistent z and refresh zt = (z - z_old)/dt.
 
-        The first datum of a level also initialises ``z_old``, so ``zt``
+        The first datum of a run also initialises ``z_old``, so ``zt``
         starts at zero and every noise level is a fresh statistical start.
         """
         if not self.z_started:
@@ -69,22 +70,32 @@ def l2diff(u, v, mesh):
     return l2norm(u - v, mesh)
 
 
+class TheorySpecError(ValueError):
+    """A problem class is missing specification the driver or the theory
+    checklist cannot guess; the message names every missing piece."""
+
+
 class Problem:
     """Base class: what a problem must provide for the generic driver.
 
-    Required hook
-    -------------
-    ``forms(state)``       return the joint (BilinearForm, LinearForm) pair at
-                           the current step (the MRAS weak form of the model).
+    Required hooks
+    --------------
+    ``forms(state)``       return the joint (BilinearForm, LinearForm) pair
+                           at the current step (the MRAS weak form).
+    ``coupling(q, z, s)``  the q-dependent part of f as a weak functional
+                           (see below); waived only by ``theory_exempt``.
+    plus one data hook: ``observations``, ``truth``, or ``forward_forms``.
+    The constructor raises :class:`TheorySpecError` naming anything missing;
+    ``examples/blank_problem.py`` is the smallest complete example.
 
     Data hooks (the base ``data()`` resolves them in this order)
     ------------------------------------------------------------
     ``observations(state)``  known data as a coefficient or grid function —
                              use for measured data that already contains its
-                             own noise (run at level 0).
+                             own noise (run at noise level 0%, noise-free).
     ``truth(state)``         ground-truth state ``u^dagger`` at ``state.t``;
                              observations are synthesized as truth plus
-                             Gaussian FEM noise at the requested level.
+                             Gaussian FEM noise at the requested noise level.
     ``forward_forms(step)``  one backward-Euler-type step of the model at
                              ``step.t`` with the parameter frozen at
                              ``q_true``; used when neither of the above is
@@ -100,17 +111,17 @@ class Problem:
                              the tracked error_q = ||qhat-q||/||q|| is
                              reported only when it is known.
     ``data_domains``         optional finer ``Domains`` for data generation.
-    ``incremental``          solve for the increment into ``aux`` and add it to
-                             ``gf`` (True) or solve for the new state directly
-                             (False).
+    ``incremental``          solve for the increment into ``aux`` and add it
+                             to ``gf`` (True) or solve for the new state
+                             directly (False).
     ``stop_margin``          loop runs while ``t < tend - stop_margin*dt``.
     ``counter_start``        first step index of the identification loop.
     ``series_counters``      step indices where solution snapshots are kept.
     ``on_step``              callback ``on_step(state)``, invoked once after
-                             ``init_level`` and once after every solved step;
+                             ``init_run`` and once after every solved step;
                              used by the live visualization in :mod:`mras.live`.
 
-    ``init_level`` sets the starting ``gfu``, ``gfq`` (from ``initial_guess``)
+    ``init_run`` sets the starting ``gfu``, ``gfq`` (from ``initial_guess``)
     and the reference ``u_true`` at ``tstart``; the driver records the t=0
     errors and snapshots before the first step. Runs without ground truth
     report the state misfit ``||u - z||`` instead of error histories.
@@ -125,7 +136,7 @@ class Problem:
     saved_every = 100
     series_counters = ()
     sigma = 1.0
-    L = 1.0
+    L = None
     u0 = None
     q_true = None
     data_domains = None
@@ -142,9 +153,10 @@ class Problem:
         self.v, self.s = self.X.TestFunction()
         self.noise = GaussianFEMNoise(self.Ufes, seed=self.seed)
         self._snaps = None
+        self._validate_theory_spec()
 
     # -- hooks ----------------------------------------------------------
-    def init_level(self, state):
+    def init_run(self, state):
         """Set gfu / gfq / u_true initial values for one noise level.
 
         The driver mirrors gfu and gfq into the joint solver function, so
@@ -152,7 +164,7 @@ class Problem:
         """
         if self.u0 is None:
             raise NotImplementedError(
-                f"{self.name}: set u0 or override init_level")
+                f"{self.name}: set u0 or override init_run")
         state.gfu.Set(self.u0)
         state.u_true.Set(self.u0)
         state.gfq.Set(self.initial_guess())
@@ -183,15 +195,56 @@ class Problem:
     to vanish, for problems that reproduce a paper-literal discretisation
     instead of the abstract pairing; None means machine precision expected."""
 
-    coupling_kernel = None
-    """Callable c(z, v) with <f(q, z), v> = int q * c(z, v) dx, declared by
-    problems whose f is affine in q; the (A2) pairing is then int q^2-style
-    degenerate testing.  None (not declared) when f is not affine in q."""
+    coupling = None
+    """The q-dependent part of f as a weak functional: <F(q, z), s> =
+    int coupling(q, z, s) dx, where q is the parameter (coefficient or grid
+    function), z a state grid function and s the U_h test function.  f may
+    hold further z-only terms: they cancel in every difference the checklist
+    forms, and they live in forms() for the solver.  From this one hook the
+    checklist derives whether f is affine in q (forcing sigma = 0, L = 0),
+    estimates the (A1) Lipschitz remainder when it is not, and measures
+    (A2) monotonicity -- no separate kernel or monotonicity hook to keep in
+    sync.  Required unless theory_exempt waives the ladder."""
 
-    monotone_pair = None
-    """Callable (qa, qb, z) -> integrand [f(qa, z) - f(qb, z)] * (qa - qb)
-    for pointwise nonlinear f, declared by problems with f nonlinear in q.
-    None (not declared) for affine couplings or absent parameters."""
+    coupling_adjoint = None
+    """Adjoint pairing density: <f_q(q, z) p, s> = int p * coupling_adjoint(
+    q, z, s) dx, transcribed independently of coupling(); the checklist
+    pre-verifies the pairing on random draws before any solving.  Without
+    it the pre-verification reports UNVERIFIABLE."""
+
+    theory_exempt = None
+    """One-line reason the theory ladder does not apply (e.g. the parameter
+    is absent from the truth model); waives coupling() and makes every
+    theory rung report UNVERIFIABLE with this reason."""
+
+    def _validate_theory_spec(self):
+        cls = type(self)
+        missing = []
+        if cls.forms is Problem.forms:
+            missing.append("forms(state): the joint weak form of one step")
+        if (cls.data is Problem.data and cls.observations is Problem.observations
+                and cls.truth is Problem.truth
+                and cls.forward_forms is Problem.forward_forms):
+            missing.append("a data hook: observations(state), truth(state), "
+                           "or forward_forms(step)")
+        if cls.coupling is None and not self.theory_exempt:
+            missing.append(
+                "coupling(q, z, s): the q-dependent part of f as a weak "
+                "functional -- e.g. f(q, z) = q*exp(z) gives "
+                "\"return q * exp(z) * s\" -- or, if the parameter is absent "
+                "from the truth model, theory_exempt = \"<reason>\"")
+        if missing:
+            raise TheorySpecError(
+                f"{cls.__name__} is not runnable as specified; missing:\n  - "
+                + "\n  - ".join(missing)
+                + "\nSee examples/blank_problem.py for the smallest "
+                "complete example.")
+        if cls.coupling is not None and cls.coupling_adjoint is None:
+            warnings.warn(
+                f"{cls.__name__}: no coupling_adjoint(q, z, s) declared -- "
+                "the f_q/f_q* pairing pre-verification will report "
+                "UNVERIFIABLE (recommended, see mras/verify.py)",
+                stacklevel=4)
 
     def data(self, state):
         """Feed one step: resolve data, refresh u_true, g, and z."""
@@ -215,7 +268,7 @@ class Problem:
         else:
             state.u_true.vec.data = np.asarray(
                 self._snaps[state.counter - 1], dtype=np.float64)
-        state.set_z(self.noise.draw(state.u_true, state.level, state.counter))
+        state.set_z(self.noise.draw(state.u_true, state.noise_level, state.counter))
 
     def forms(self, state):
         raise NotImplementedError
@@ -273,11 +326,13 @@ class Problem:
             GMRES(A=a.mat, b=res.vec, pre=pre, x=target.vec,
                   maxsteps=1000, tol=1e-12, printrates=False)
 
-    def run_level(self, level, progress=True):
+    def run_level(self, noise_level, progress=True):
+        """One identification run at a noise level: ``noise_level`` is a
+        fraction, 0.05 means noise level 5%, 0.0 is noise-free."""
         from .results import LevelResult
         started = time.perf_counter()
-        state = State(self, level)
-        self.init_level(state)
+        state = State(self, noise_level)
+        self.init_run(state)
         # Mirror the initial estimate into the joint solver function: the
         # incremental update is carried in state.gf, and BVP also uses it as
         # the initial guess of the direct solve.
@@ -309,7 +364,8 @@ class Problem:
                 headline = (error_q[-1] if error_q is not None
                             else error_u[-1] if error_u is not None
                             else misfit_u[-1])
-                print(f"\r{self.name} level={level}: t={state.t.Get():.3f}"
+                print(f"\r{self.name} noise_level={noise_level}: "
+                      f"t={state.t.Get():.3f}"
                       f"/{self.tend}  err={headline:.3e}", end="", flush=True)
             a, res = self.forms(state)
             a.Assemble()
@@ -342,7 +398,7 @@ class Problem:
         if progress:
             print()
         result = LevelResult(
-            problem=self.name, noise_level=level,
+            problem=self.name, noise_level=noise_level,
             error_u=np.array(error_u) if error_u is not None else None,
             error_q=np.array(error_q) if error_q is not None else None,
             misfit_u=np.array(misfit_u),
@@ -362,6 +418,7 @@ class Problem:
                 or type(self).truth is not Problem.truth
                 or type(self).forward_forms is not Problem.forward_forms)
 
-    def run(self, levels, progress=True):
-        """One run per noise level; levels are statistically independent."""
-        return [self.run_level(level, progress) for level in levels]
+    def run(self, noise_levels, progress=True):
+        """One run per noise level; runs at different noise levels are
+        statistically independent."""
+        return [self.run_level(p, progress) for p in noise_levels]

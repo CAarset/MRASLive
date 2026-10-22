@@ -19,7 +19,7 @@ the ``f'_q(q, z)`` coupling of the state row), while the diagonal blocks
 symmetric by construction.  Pairing draws that live on one block at a
 time cancels the diagonal blocks identically and isolates ``K - N^T``.
 
-With the alignment ``z_old := z`` (one fresh, single-level datum, i.e. the
+With the alignment ``z_old := z`` (one fresh datum at a single noise level, i.e. the
 operator the continuous scheme assigns to the step) the mismatch must
 vanish to machine precision for every problem that implements the
 abstract scheme.  On an untouched step taken mid-assimilation the lagged

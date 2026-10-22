@@ -98,8 +98,14 @@ class BurgersPipe(Problem):
     symmetric = False  # the q -> u coupling block makes the joint form
     # nonsymmetric (block-triangular, as for Darcy; GMRES is the safe choice)
 
-    def coupling_kernel(self, z, v):
-        return grad(z) * grad(v)
+    def coupling(self, q, z, s):
+        # The convective term z z_x carries no q and cancels in every
+        # difference the checklist forms; only the diffusion coupling is q-
+        # dependent.
+        return q * grad(z) * grad(s)
+
+    def coupling_adjoint(self, q, z, s):
+        return grad(z) * grad(s)
 
     def __init__(self, h=0.15, dt=1e-2, tend=10.0, k_u=3, seed=0,
                  series_counters=()):
@@ -148,10 +154,10 @@ class BurgersPipe(Problem):
 
 def run(cfg):
     prob = build(BurgersPipe, cfg, series_counters=cfg.counters())
-    results = prob.run(cfg.levels)
+    results = prob.run(cfg.noise_levels)
     out = Path(cfg.out or "results/burgers_pipe")
     out.mkdir(parents=True, exist_ok=True)
-    print(f"\n{'level':>6} {'err_u':>9} {'err_q':>9} {'misfit':>9}")
+    print(f"\n{'noise_level':>7} {'err_u':>9} {'err_q':>9} {'misfit':>9}")
     for res in results:
         res.save(out)
         print(f"{res.noise_level:>6g} {res.final_error_u:>9.4f} "
@@ -171,7 +177,7 @@ def main():
     ap.add_argument("--h", type=float, default=0.15)
     ap.add_argument("--dt", type=float, default=1e-2)
     ap.add_argument("--tend", type=float, default=10.0)
-    ap.add_argument("--levels", type=float, nargs="+", default=[0.0, 0.05])
+    ap.add_argument("--noise-levels", type=float, nargs="+", default=[0.0, 0.05])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--quick", action="store_true", help="small sizes, seconds")
     args = ap.parse_args()
@@ -180,10 +186,10 @@ def main():
         for cfg in load_yaml(args.config):
             run(cfg)
         return
-    cfg = RunConfig(h=0.35, dt=0.02, tend=0.6, levels=[0.0, 0.1], seed=0,
+    cfg = RunConfig(h=0.35, dt=0.02, tend=0.6, noise_levels=[0.0, 0.1], seed=0,
                     out="results/burgers_pipe_quick") if args.quick else \
         RunConfig(h=args.h, dt=args.dt, tend=args.tend,
-                  levels=args.levels, seed=args.seed)
+                  noise_levels=args.noise_levels, seed=args.seed)
     run(cfg)
 
 

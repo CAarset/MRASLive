@@ -42,7 +42,7 @@ inverse-iteration probe in mras.verify): the rate field is then seen at
 the squared amplitude of the (pre-heated, reaction-dominated) state, and
 the heater amplitudes are chosen reaction-dominated (three to four times
 the background) so that the r^2 gain is large.  Measured on this design
-(h = 0.3, dt = 0.02, level 0): relative q-error 0.37 at t = 4, 0.13 at
+(h = 0.3, dt = 0.02, noise level 0%): relative q-error 0.37 at t = 4, 0.13 at
 t = 8, 0.081 at t = 28 with a tail decay of about 1 % per time unit - the
 rate scales as the heater amplitude squared, as the flow-composition
 argument predicts.  The asymptotic plateau is rate-limited by the
@@ -179,9 +179,12 @@ class _ArrheniusBase(Problem):
 
     C_scale = 1.0  # tracking operator C = -Laplace
 
-    def coupling_kernel(self, z, v):
-        """<f(q, z), v> = int q r(z) v dx: the (A2) pairing is int q^2 r(z)."""
-        return self.r(z) * v
+    def coupling(self, q, z, s):
+        """<f(q, z), s> = int q r(z) s dx: the (A2) pairing is int q^2 r(z)."""
+        return q * self.r(z) * s
+
+    def coupling_adjoint(self, q, z, s):
+        return self.r(z) * s
 
     def forward_forms(self, step):
         """Implicit Euler with the Arrhenius factor Picard-lagged in u_prev:
