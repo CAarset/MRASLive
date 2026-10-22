@@ -84,8 +84,8 @@ checkpoint commit 4749311).
 ## Reproduction acceptance
 - Main figures: qualitatively matching panels regenerated from new code.
 - Tables 6–8: treated as order-of-magnitude context (docs/PAPER_TARGETS.md);
-  new-code results must be logically consistent — clean levels decay, noisy
-  levels plateau at the noise scale, Table-8 sensitivity trends reproduced.
+  new-code results must be logically consistent — noise-free runs decay, noisy
+  runs plateau at the noise scale, Table-8 sensitivity trends reproduced.
 - Any systematic mismatch → flagged in the final report, not hidden.
 
 ## Progress log

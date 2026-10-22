@@ -8,7 +8,7 @@ extensible design, so its numbers are its own.
 
 ## Noise model — `mras/noise.py`
 
-- Observations are `z = u_dagger + level * e / ||e||_M * ||u_dagger||_M`,
+- Observations are `z = u_dagger + noise_level * e / ||e||_M * ||u_dagger||_M`,
   where `e ~ N(0, M^-1)` is an L2-Gaussian FEM field: the whitening
   `e = M^(-1/2) eta`, `eta ~ N(0, I)` on the degrees of freedom, gives the
   continuum-consistent covariance `M^-1` (nodal or mass-lumped whitening
@@ -22,9 +22,9 @@ extensible design, so its numbers are its own.
   Mass lumping is not used because row-sum lumping of a P3 mass matrix is
   not positive.
 - The draw is renormalised by the exact energy `sqrt(e . M e)`, so
-  `||z - u_dagger||_L2 = level * ||u_dagger||_L2` holds exactly; level 0
-  returns the field unchanged.
-- Every draw is seeded: the RNG is keyed by `(seed, level, counter)`, so a
+  `||z - u_dagger||_L2 = noise_level * ||u_dagger||_L2` holds exactly;
+  `noise_level = 0` (noise-free) returns the field unchanged.
+- Every draw is seeded: the RNG is keyed by `(seed, noise_level, counter)`, so a
   run is fully reproducible and each time step is statistically independent.
 
 ## Initial states, sources, references
@@ -65,10 +65,10 @@ extensible design, so its numbers are its own.
 - NGSolve drops BilinearForm terms without a trial function silently, so
   every term linear in an unknown enters as an implicit increment plus an
   explicit previous-level half in the residual.
-- Each noise level is a fresh start: `run()` builds a new `State` per level,
-  `init_level` supplies the t = 0 reference and the initial estimate, and
-  `State.set_z` primes `z_old` with the level's first datum, so the data
-  difference term starts at zero on every level.
+- Each noise level is a fresh start: `run()` builds a new `State` per noise level,
+  `init_run` supplies the t = 0 reference and the initial estimate, and
+  `State.set_z` primes `z_old` with the noise level's first datum, so the
+  difference term starts at zero on every noise level.
 - Dirichlet sets follow the reference fields: Fisher carries "wall"
   conditions on U_h, Darcy's Q_h space is free, and potential/Allen-Cahn
   use free spaces because their references do not vanish on the boundary.
@@ -122,7 +122,7 @@ Open — where the code cannot force conformance:
 - (A2) coercivity of the coupled linearisation is unverified, exactly as
   the paper leaves it for its own Darcy benchmark (Remark 4.2); the
   justification there is persistent excitation (PE) of the source.
-- PE evidence (level 0, `h = 0.35`, `dt = 0.02`, relative `error_q`):
+- PE evidence (noise level 0% (noise-free), `h = 0.35`, `dt = 0.02`, relative `error_q`):
 
   | source / horizon / wake | `error_q` | min over run |
   |---|---|---|
@@ -147,7 +147,7 @@ Open — where the code cannot force conformance:
   errors 0.33–0.60 (Table 6).
 - The shipped demo takes the best-behaving variants (smooth wake, distinct
   frequencies on top of the original phase stagger, `T = 10`; measured
-  level-0 relative error 0.777 — the phase-staggered variant behaves like
+  noise-free relative error 0.777 — the phase-staggered variant behaves like
   the in-phase row above, within the plateau band).  The deeper question —
   whether to accept the heater grid as PE surrogate, switch to per-step
   randomised spatial sources (the Darcy benchmark's own recipe), or change
@@ -190,7 +190,7 @@ where the paper's theory is fully verifiable:
   way); with `L = 0` any `M <= lambda_1` is admissible (the pair declares
   `N_tilde = 1`, the strict inequality `lambda_1 > L^2 / (2 C_coe)` holds
   with margin `0.125 > 0`).
-- Measured recovery (level 0, `h = 0.3, dt = 0.02, data_h = 0.15`):
+- Measured recovery (noise level 0% (noise-free), `h = 0.3, dt = 0.02, data_h = 0.15`):
   relative `q`-error 0.37 (t = 4), 0.13 (t = 8), 0.081 (t = 28) for both
   members, tail decay ~1%/time-unit.  Both members therefore sit inside
   the "good" band (< 10%) at long horizon; "excellent" (< 5%) is not
@@ -282,10 +282,10 @@ verdict per example.
 
 ## Verification anchors
 
-- `pytest tests/` (79 tests) covers the fixed-point bookkeeping (t = 0
+- `pytest tests/` (84 tests) covers the fixed-point bookkeeping (t = 0
   error seeding for all problems, seeded reproducibility, fresh-start
   independence), the noise whitening (covariance moments, exact relative
-  level), degree-of-freedom anchors, the field helpers, the Burgers
+  noise level), degree-of-freedom anchors, the field helpers, the Burgers
   conformance form, the live helper (hook throttling, relative-error
   seeding, the fixed-framerate movie stitch), the adjoint pairing test
   (machine precision for the exact-coupling examples, documented ratios

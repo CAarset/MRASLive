@@ -41,11 +41,14 @@ from mras.problems.darcy import DarcyProblem
 from mras.plotting import error_figure
 
 prob = DarcyProblem(h=0.04, dt=1e-3, tend=5.0)      # mesh + orders + data
-results = prob.run(levels=[0.0, 0.05])              # noisy data -> MRAS loop
+results = prob.run(noise_levels=[0.0, 0.05])        # noisy data -> MRAS loop
 for r in results:
     print(r.noise_level, r.final_error_u, r.final_error_q)
 error_figure(results, prob.dt, fname="errors.png")
 ```
+
+`noise_level` is always a fraction: `0.0` is noise-free, `0.05` is noise
+level 5%.
 
 ## Live notebook
 
@@ -71,9 +74,23 @@ stitch).  Run it with `jupyter lab notebooks/mras_live.ipynb`.
 
 ## Your own reconstruction problem, step by step
 
+**Start by copying `examples/blank_problem.py`.**  It is a complete,
+self-contained problem — recovery of a reaction coefficient `q(x)` in
+`Dt u - Δu + q u = g` — with four clearly marked TODO blocks (mesh,
+source, `q_true`, joint weak form) and the theory hooks already wired:
+run it, and it identifies `q` at noise level 0% (noise-free) and noise
+level 5%, prints the full checklist, and writes its figures.  Rename the
+class, edit the blocks, keep the structure; the constructor refuses any
+problem that is *not* runnable and names every missing piece (see below).
+`examples/burgers_pipe.py` (pipe geometry, heater-grid source) and
+`mras/problems/arrhenius.py` (the fully verifiable reference) show the
+same contract under more geometry and more nonlinearity.
+
 A problem is a `mras.Problem` subclass on `(U_h, Q_h) = P3 x P0` over any
-NGSolve mesh.  Five decisions — exactly one hook is mandatory, the others
-unlock automatic verification:
+NGSolve mesh.  The constructor validates the contract and raises
+`TheorySpecError` listing exactly what is missing — the weak form, a data
+hook, or the coupling declaration — so nothing fails halfway into a
+campaign.
 
 **1. Domain.**  Reuse a builder (`mras.domains.darcy(maxh=h, order_u=k_u,
 order_q=0)` for a rectangle, `fisher`, `potential`) or return your own
@@ -84,9 +101,9 @@ order_q=0)` for a rectangle, `fisher`, `potential`) or return your own
 this order:
 
 * `observations(state)` — you have measurements, as a `GridFunction` that
-  already contains its own noise; run at level 0.
+  already contains its own noise; run at `noise_level=0.0` (noise-free).
 * `truth(state)` — synthetic data: observations = truth + seeded FEM Gaussian
-  noise at the requested level; `error_u`, `error_q` become available.
+  noise at the requested `noise_level`; `error_u`, `error_q` become available.
 * `forward_forms(step)` — no data at all: the driver steps *your forward weak
   form* (backward Euler) on a finer mesh (`data_domains`) to generate the
   observations, with `source(t)`, `u0` and `q_true` as inputs.
@@ -99,16 +116,13 @@ the estimator's start — the initial error *is* an experimental choice.
 joint `(BilinearForm, LinearForm)` of one step: mass rows `u*v`, `q*s`, the
 diffusion of your choice (the `C` slot), the `sigma`-bracket
 `Dt z + f(q,z) - g`, and the aligned tracking term from `state.z`/`z_old`.
-Worked templates: `examples/burgers_pipe.py` (complete — pipe geometry,
-forward and estimator forms side by side, heater-grid source supplying the
-persistent excitation the parameter flow needs) and
-`mras/problems/arrhenius.py` (the fully verifiable reference).  Then run:
+Then run:
 
 ```python
 p = MyProblem(h=0.2, dt=0.05, tend=1.5, seed=0)
-res = p.run_level(0)                 # LevelResult: error_q, error_u, series
-p.run(levels=[0.0, 0.05])            # campaign; then error_figure(results, p.dt)
-.venv/bin/python examples/burgers_pipe.py --quick     # template smoke run
+res = p.run_level(0.0)               # LevelResult: error_q, error_u, series
+p.run(noise_levels=[0.0, 0.05])      # campaign; then error_figure(results, p.dt)
+.venv/bin/python examples/blank_problem.py       # the template, end to end
 ```
 
 **4. Two things are verdicts, not choices.**  `sigma` is forced by the
@@ -123,35 +137,40 @@ line in `mras/verify.py` plus `check_example("my_problem")`):
 
 | declare | unlocks automatically | without it |
 |---|---|---|
-| `coupling_kernel(z, v)` — the affine pairing `int p * f_q* s` | (A1) affine family, sigma consistency, `L = 0` exact; (A2) kernel probe | (A1), (A2) unverifiable |
-| `monotone_pair(qa, qb, z)` — pointwise monotone kernel of nonlinear `f` | (A1) nonlinear family + sigma = 1 requirement; (A2) localised pair probe, measured minimum | (A1), (A2) unverifiable |
-| `c_coe()` — analytic witness (ess-inf or volume average of the multiplier over the datum range; helpers `data_range()`, `essinf_datum()` exist per family) | (A2) OK *with provenance*, feeding the (A3) margin | probe-only value |
+| `coupling(q, z, s)` — the q-dependent part of f as a weak functional (return the integrand; the framework appends `*dx`; z-only terms of f cancel in every checklist difference and stay out) | (A1) affine/nonlinear family + sigma consistency; (A2) measured monotonicity ladder | the constructor refuses the problem — or `theory_exempt = "<reason>"` waives the ladder honestly |
+| `coupling_adjoint(q, z, s)` — independently transcribed density of `f_q(q~(z), .)^*` | coupling pre-verification: the declared pairing is checked against the numerical q-derivative of `coupling` before any solving | pre-verification unverifiable (warned at construction) |
+| `L` — Lipschitz remainder of `f` in q | (A1) OK analytically | nonlinear f: remainder ESTIMATED numerically, loudly warned, never fed into (A3) |
+| `c_coe()` — analytic witness (ess-inf or range minimum of the multiplier over the datum range; helpers `data_range()`, `essinf_datum()` exist per family) | (A2) OK *with provenance*, feeding the (A3) margin | probe-only measured value |
 | `C_scale` (`C = C_scale*(-Delta)`) — or norm-dependent `C` inside `forms` | (A3) margin `lambda_1(C) > L^2/(2 C_coe)` with the slack reported for `M` | (A3) unverifiable |
 
 What you get with *no* declarations at all, never silently: adjoint pairing
 (probed on the **assembled step operator**, needs no hooks), persistent
 excitation, reconstruction descent, and — via `check_example` — seeded
-reproducibility.  The ladder `OK > DEVIATION > UNVERIFIABLE > FAIL` is the
-contract pinned by `tests/test_verify.py`, which includes a *new* example
-built by pure inheritance — rate law `r(w) = 1 + w + w^2` with its witness
-minimised over the datum range (`QuadraticRateProblem`), and a bare variant
+reproducibility.  The ladder `OK > DEVIATION > ESTIMATED > UNVERIFIABLE >
+FAIL` is the contract pinned by `tests/test_verify.py`, which includes a
+*new* example built by pure inheritance — rate law `r(w) = 1 + w + w^2`
+with its witness minimised over the datum range
+(`QuadraticRateProblem`) — a nonlinear-in-`q` variant whose remainder is
+*estimated*, not declared (`SquaredQProblem`), and a bare variant
 asserting the honest degradation.  Copy that pattern for your problem.
 
-Still author-side for nonlinear-in-`q` examples: the closed-form Lipschitz
-modulus `L(||q||)` (declare `L`; the derive/estimate/prompt ladder is
-specified in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md) section 5, pending
-implementation) — for affine families `L = 0` is exact, nothing to do.
+An ESTIMATED verdict means the checklist measured the constant from your
+coupling hook (radius-3 sampled remainder bounds, K-dual norm) and warns:
+an estimate must never silently feed the (A3) margin.  Declare `L` to
+confirm it.
 
 ## Verification checklist
 
 Every example — past or future — runs through the same fixed questions
 (`mras/verify.py`): adjoint pairing (`<Ax, y> = <x, A*y>` to numerical
-precision), the (A1) Lipschitz remainder and the `sigma` it forces, the
-(A2) monotonicity witness `C_coe`, the (A3) coercivity margin
-`lambda_1(C) > L^2/(2 C_coe)`, persistent excitation of the datum,
-reconstruction descent, seeded reproducibility.  Verdicts are `ok`,
-`fail` (the honest negative), `deviation` (documented), or
-`unverifiable` (flagged, never silently skipped):
+precision), coupling pre-verification (declared `coupling_adjoint` vs the
+numerical q-derivative of `coupling`), the (A1) Lipschitz remainder and
+the `sigma` it forces, the (A2) monotonicity witness `C_coe`, the (A3)
+coercivity margin `lambda_1(C) > L^2/(2 C_coe)`, persistent excitation of
+the datum, reconstruction descent, seeded reproducibility.  Verdicts are
+`ok`, `fail` (the honest negative), `estimated` (measured, warned, never
+promoted), `deviation` (documented), or `unverifiable` (flagged, never
+silently skipped):
 
 ```bash
 .venv/bin/python scripts/checklist.py       # writes results/checklist.md
@@ -168,7 +187,7 @@ from YAML: one mapping, a sequence, a `{defaults, runs}` merge, or multiple
 documents.  `configs/burgers.yaml` is the reference:
 
 ```yaml
-defaults: {dt: 0.01, tend: 5.0, k_u: 3, levels: [0.0, 0.05, 0.2],
+defaults: {dt: 0.01, tend: 5.0, k_u: 3, noise_levels: [0.0, 0.05, 0.2],
            times: [2.0, 5.0]}
 runs:
   - {h: 0.15}
@@ -182,7 +201,7 @@ runs:
 ## Running the studies (Tables 6–8, Figs 4–12)
 
 Each campaign runs one noise level per process and resumes where a previous
-run stopped (finished levels are skipped).  Figures and the markdown table
+run stopped (finished noise levels are skipped).  Figures and the markdown table
 are assembled from the saved runs afterwards.
 
 | paper item | campaign | figures |
@@ -190,12 +209,13 @@ are assembled from the saved runs afterwards.
 | Fig 4, Table 6 (Darcy) | `scripts/darcy_reproduce.py --out results/darcy` | `scripts/make_figures.py --problem darcy --in results/darcy` |
 | Table 7, Figs 5–8 (Fisher, potential) | `scripts/reproduce.py --problem fisher` / `--problem potential` | `scripts/make_figures.py --problem fisher` etc. |
 | Table 8, Figs 9–11 (Allen–Cahn) | `scripts/reproduce.py --problem allen_cahn` | `scripts/make_figures.py --problem allen_cahn` |
-| Fig 12 / Table 8 (q0 sensitivity) | vary the initial estimate in `init_level`, then `scripts/reproduce.py --problem fisher` / `--problem allen_cahn` | as above |
+| Fig 12 / Table 8 (q0 sensitivity) | vary the initial estimate in `init_run`, then `scripts/reproduce.py --problem fisher` / `--problem allen_cahn` | as above |
 | Darcy data cross-check | `scripts/darcy_dataset.py --quick` | writes `comparison.json` |
 
-Full-size runs are hours-long per level on 32 cores; every script accepts
-`--micro` for a seconds-long wiring check and `--h/--dt/--tend/--levels`
-overrides.  Keep `OMP_NUM_THREADS` small if other work is running.
+Full-size runs are hours-long per noise level on 32 cores; every script accepts
+`--micro` for a seconds-long wiring check and `--h/--dt/--tend/
+--noise-levels` overrides.  Keep `OMP_NUM_THREADS` small if other work is
+running.
 
 ## Repository layout
 
@@ -205,15 +225,16 @@ mras/               package: scheme (MRAS loop + data resolution), config
                     (webgui panels), verify (theory checklist),
                     problems/{darcy,fisher,potential,allen_cahn,arrhenius},
                     data/pdebench, results, plotting
-mras_live.ipynb     live six-panel notebook (Burgers preset)
-examples/           runnable demos (Burgers pipe template, Helmholtz,
-                    decaying Darcy, quickstart)
+notebooks/        live six-panel notebook (Burgers preset)
+examples/           runnable demos (blank template to copy, Burgers pipe,
+                    Helmholtz, decaying Darcy, quickstart)
 configs/            YAML run configurations
 scripts/            reproduction campaigns, figure assembly, the theory
                     checklist, the Arrhenius reconstruction demo
 tests/              pytest suite (domains, fields, noise, scheme, live,
                     config, plotting, adjoint, arrhenius, verify)
-docs/               cleanup plan, paper-target mapping, deviation report
+docs/               cleanup plan and cleanup flags, paper-target mapping,
+                    deviation report, assumption-by-assumption status
 ```
 
 ## Tests

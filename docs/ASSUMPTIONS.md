@@ -189,9 +189,10 @@ construction, verified assumptions") suggests the numerical analogue: draw
 parameter ball, `z` on or near the datum manifold produced by the example's
 own data operator, `p, s` random coefficient fields — and verify
 `|⟨f_q p, s⟩ − ⟨p, f_q* s⟩| / (|⟨f_q p, s⟩| + |⟨p, f_q* s⟩|) < 1e-10` per draw.
-This runs **at problem-construction time**, before and independent of any
-MRAS run, from declared hooks — it validates the transcription `f_q ↔ f_q*`
-and nothing else. All eight rows are expected machine precision: for
+This runs **at checklist time, before any solving** (the constructor only
+warns once when `coupling_adjoint` is missing), from declared hooks — it
+validates the transcription `f_q ↔ f_q*` and nothing else. All eight rows
+are expected machine precision: for
 Darcy-type it compares the two code paths `∫p∇z·∇s` (left, U*-action paired
 with s) and `∫p(∇z·∇s)` (right); the identity is real at the level of *the
 assembler's quadrature of two written expressions*, which is exactly what a
@@ -213,6 +214,10 @@ Conflating the three is what made the old verdict table confusing.
 ---
 
 ## 5. The L / C pipeline: derive, or estimate on permission, never silently
+
+*Status (implementation ledger in §7): R0, R2, the §4.2 pre-verification
+and K1 are implemented in `mras/verify.py`; R1 (closed-form template),
+R3 (prompt) and the K0 certificate remain designed-but-unbuilt.*
 
 ### 5.1 Ladder for L(‖q‖_H) — rung by rung, most rigorous first
 
@@ -396,16 +401,17 @@ With `Q = H = ℝ` (constants embedded in `L²(Ω)`), `f(q,z) = −Δz + q·r(z)
 | rung / piece | paper | repo today | gap |
 |---|---|---|---|
 | σ switch | forced by q-linearity | `sigma` attribute; `check_a1_sigma` verifies kernel/pair consistency | — |
-| L = 0 (R0) | implicit | affine-kernel detection + `L = 0.0` declaration | add the 100-draw quadratic-remainder identity probe |
+| L = 0 (R0) | implicit | `_probe_affine` chord-gap probe (8 draws, < 1e-9 ⇒ affine ⇒ `L = 0` exact); declared `L = 0` upgraded to analytic OK | — |
 | L closed form (R1) | rows 4–5 done by hand | manual | Nemytskii template + monotonicity-by-construction + κ provenance |
-| L estimated (R2) | — | — | new: dual-norm probe protocol, ESTIMATED status |
+| L estimated (R2) | — | `_estimate_lipschitz`: radius × draw grid, K-dual norm ⇒ ESTIMATED + construction-time-independent `UserWarning`; the estimate never feeds (A3) | — |
 | prompt (R3) | — | UNVERIFIABLE (reads "cannot say") | new NEEDS_INPUT status + three-branch prompt |
-| (A2) witness | rows 4–5 `z̲`; 6–7 `ess inf r(z̲)` | `c_coe()` analytic hook + probes | extend hook to volume-average (row 8); reword FAIL with Remark-4.2 context |
-| (A3) certificate (K0) | tautological C | λ₁-probe only ⇒ "norm-dependent C: unverifiable" artifact | form-equality certificate; K1 for non-Riesz B; K2 constructive default |
-| adjointness pre-verification | "verified assumptions" style | scheme-level only (`mras/adjoint.py`) | §5.2: 100-draw declared-pair precheck at construction, decoupled from runs |
+| (A2) witness | rows 4–5 `z̲`; 6–7 `ess inf r(z̲)` | `c_coe()` analytic hook + localised patch probe with U_h-view relaxation; FAIL wording carries the Remark-4.2 context | volume-average hook (row 8, waits on the Helmholtz rework) |
+| (A3) certificate (K0) | tautological C | K1 done: `_lambda1` CG-preconditioned inverse iteration (local Riesz) on `C = C_scale*(-Delta)`; norm-dependent C ⇒ honest UNVERIFIABLE | form-equality certificate (K0); constructive default (K2) |
+| adjointness pre-verification | "verified assumptions" style | `check_pairing`: 100-draw declared-pair precheck against the numerical q-derivative of `coupling`, before any solving; construction warns once when `coupling_adjoint` is missing | — |
 | scalar parameter space | — | mesh-based `Qfes` assumed | `NumberSpace(mesh)` probed working; scheme + error_q adaptation |
 
-The two new statuses (ESTIMATED, NEEDS_INPUT) keep the honesty ladder
-strictly ordered: `OK (proved/witnessed) > DEVIATION (measured, explained) >
+ESTIMATED (measured, extrapolated) is live in the ladder, strictly ordered
+`OK (proved/witnessed) > DEVIATION (measured, explained) >
 ESTIMATED (measured, extrapolated) > UNVERIFIABLE (silent inputs insufficient)
-> NEEDS_INPUT (action required) > FAIL (contradicted)`.
+> FAIL (contradicted)`; NEEDS_INPUT remains proposed with R3 (three-branch
+prompt), its prerequisite.
