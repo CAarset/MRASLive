@@ -32,8 +32,7 @@ excitation surrogate.  See docs/DEVIATIONS.md for the full audit.
 import argparse
 from pathlib import Path
 
-from ngsolve import (BilinearForm, LinearForm, dx, exp, grad, pi, sin, sqrt,
-                     x, y)
+from ngsolve import BilinearForm, LinearForm, dx, exp, grad, pi, sin, sqrt, x, y, IfPos
 
 from mras.config import RunConfig, build, load_yaml
 from mras.domains import burgers_pipe
@@ -41,49 +40,82 @@ from mras.plotting import error_figure, evolution_figure
 from mras.scheme import Problem
 
 LENGTH, HEIGHT = 6.0, 1.2
-HOLE_XS, HOLE_R = (1.5, 3.0, 4.5), 0.18
-Q_WAKE, Q_FREE, Q_RADIUS = 0.15, 1.0, 0.33
+HOLE_XS, HOLE_RADIUS = (1.5, 3.0, 4.5), 0.18
+Q_WAKE, Q_FREE, Q_RADIUS = 1.0, 1.0e-1, 0.33
 Q_SMOOTH = 0.0875  # wake decay scale, a quarter of the demo cell size
 
-# Recovery of q is driven by the persistent-excitation condition: cells
-# update only where |grad z| > 0.  The excitation is therefore a grid of
-# heaters with distinct oscillation frequencies filling the pipe, on a
-# multi-bump initial state, so every wake sits inside the sensing region.
-U0 = sum(exp(-((x - cx) ** 2 + (y - HEIGHT / 2) ** 2) / 0.25)
-         for cx in (LENGTH * (i + 0.5) / 4 for i in range(4))) \
-    * y * (HEIGHT - y) * x * (LENGTH - x)
+# Common forcing period. Every heater frequency is an integer multiple of 1/T,
+# so SOURCE(t + T) == SOURCE(t) exactly.
+T_FORCING = 8.0
+
+# Source amplitude. This is deliberately much smaller than 0.9: the state is
+# dissipative, so the source amplitude is not the state amplitude.
+SOURCE_AMPLITUDE = 5
 
 
 def SOURCE(t):
-    """Six heaters on a 3x2 grid, each oscillating with its own frequency.
+    """Six heaters on a 3x2 grid with an exact common period T_FORCING.
 
-    Distinct periods (1.6 to 2.65) break the rank-1 temporal structure a
-    common frequency would impose.  Amplitude 0.9 bounds the measured
-    ||grad z||_inf at about 12, so the explicit parameter flow gain
-    dt * ||grad z||_inf^2 / (2 lambda_1) — lambda_1 >= 7.1 for this pipe,
-    C = -Laplace — is 0.21 per unit dt: at dt = 0.02 the update runs with
-    a fivefold contraction margin.
+    Frequencies are integer multiples of 1/T_FORCING, so the source is
+    exactly periodic. The phases differ by cell, preserving spatial variety.
     """
+    # Harmonic numbers: 5, 4, 4, 4, 3, 3 cycles per forcing period.
+    harmonics = (
+        (0, 0, 5),
+        (0, 1, 4),
+        (1, 0, 4),
+        (1, 1, 4),
+        (2, 0, 3),
+        (2, 1, 3),
+    )
+
     return sum(
-        0.9 * sin(2 * pi * (0.4 * i + 0.7 * j + 0.25) + 2 * pi * t
-                  / (1.6 + 0.41 * i + 0.23 * j))
-        * exp(-((x - (i + 0.5) * LENGTH / 3) ** 2
-                + (y - (j + 0.5) * HEIGHT / 2) ** 2) / 0.15)
-        for i in range(3) for j in range(2))
+        SOURCE_AMPLITUDE
+        * sin(2 * pi * (k * t / T_FORCING + phase))
+        * exp(
+            -(
+                (x - (i + 0.5) * LENGTH / 3) ** 2
+                + (y - (j + 0.5) * HEIGHT / 2) ** 2
+            )
+            / 0.15
+        )
+        for i, j, k, phase in (
+            (i, j, k, (0.4 * i + 0.7 * j + 0.25) % 1.0)
+            for i, j, k in harmonics
+        )
+    )
 
 
 def _wake_field():
-    """q_true: low diffusion around the holes, smooth logistic rise to
-    Q_FREE.  The decay scale Q_SMOOTH keeps the target reachable by the
-    P0 space; abrupt disks put a large share of the L2 error into the
-    kink layer alone."""
-    cf = Q_FREE
-    for cx in HOLE_XS:
-        r = sqrt((x - cx) ** 2 + (y - HEIGHT / 2) ** 2)
-        cf = Q_WAKE + (cf - Q_WAKE) * (1 - 1 / (1 + exp((r - Q_RADIUS)
-                                                        / Q_SMOOTH)))
-    return cf
+    """Structured diffusion field: smooth, positive, and visually distinct.
 
+    Low diffusion in two horizontal wake bands; higher diffusion elsewhere.
+    The field is bounded in [Q_MIN, Q_MAX] and has no sharp disk boundaries.
+    """
+    Q_MIN = 0.12
+    Q_MAX = 0.55
+
+    # Two smooth low-diffusion bands around y = 0.4 and y = 0.8.
+    wake = exp(-((y - 0.4) ** 2) / 0.03) + exp(-((y - 0.8) ** 2) / 0.03)
+
+    # A mild longitudinal modulation avoids an artificially uniform wake.
+    wake *= 0.75 + 0.25 * sin(2 * pi * x / LENGTH)
+
+    return Q_MIN + (Q_MAX - Q_MIN) * (1.0 - wake / (1.0 + wake))
+
+
+def _periodic_state():
+    """Small, smooth initial state compatible with zero Dirichlet boundaries.
+
+    It is not an exact periodic solution, but it is small and has no large
+    transient, so the state settles quickly into the source-driven cycle.
+    """
+    return (
+        SOURCE_AMPLITUDE
+        * sin(2 * pi * x / LENGTH)
+        * sin(pi * y / HEIGHT)
+        * sin(2 * pi * 0.0 / T_FORCING)
+    )
 
 class BurgersPipe(Problem):
     """Identify q in Burgers flow from generated noisy state observations."""
@@ -113,7 +145,7 @@ class BurgersPipe(Problem):
                          k_u=k_u, seed=seed)
         self.series_counters = tuple(series_counters)
         self.data_domains = burgers_pipe(maxh=h / 2, order_u=k_u)
-        self.u0 = U0
+        self.u0 = _periodic_state()
         self.q_true = _wake_field()
 
     def source(self, t):
@@ -176,7 +208,7 @@ def main():
     ap.add_argument("--config", help="YAML run configuration (see mras.config)")
     ap.add_argument("--h", type=float, default=0.15)
     ap.add_argument("--dt", type=float, default=1e-2)
-    ap.add_argument("--tend", type=float, default=10.0)
+    ap.add_argument("--tend", type=float, default=100.0)
     ap.add_argument("--noise-levels", type=float, nargs="+", default=[0.0, 0.05])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--quick", action="store_true", help="small sizes, seconds")

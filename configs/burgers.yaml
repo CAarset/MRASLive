@@ -2,7 +2,7 @@
 #   .venv/bin/python examples/burgers_pipe.py --config configs/burgers.yaml
 defaults:
   dt: 0.01
-  tend: 5.0
+  tend: 10.0
   k_u: 3
   noise_levels: [0.0, 0.05, 0.2]
   times: [2.0, 5.0]

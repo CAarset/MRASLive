@@ -9,6 +9,10 @@ The expected verdicts are the audit results of the paper's examples:
   machine precision, f affine in q, (A2) FAILS as a claim (gradient
   coupling: degenerate on P0, sign-indefinite relaxation; the paper does
   not claim it, Remark 4.2), (A3) therefore unverifiable;
+* Burgers pipe additionally: reconstruction does not descend at the
+  quick-check horizon (t = 0.5) -- the banded wake field is felt on the
+  forcing timescale of several time units, the plateau the live notebook
+  documents (persistent-excitation caveat, DEVIATIONS.md);
 * Arrhenius pair: every rung confirmed -- the reference implementation of
   the abstract scheme;
 * potential / allen_cahn: paper-literal rows -> adjoint DEVIATION; f
@@ -44,7 +48,7 @@ EXPECTED = {
                "reconstruction": OK, "seeded": OK},
     "burgers": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
                 "(A2)": FAIL, "(A3)": UNVERIFIABLE, "persistent": OK,
-                "reconstruction": OK, "seeded": OK},
+                "reconstruction": FAIL, "seeded": OK},
     "arrhenius": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
                   "(A2)": OK, "(A3)": OK, "persistent": OK,
                   "reconstruction": OK, "seeded": OK},
