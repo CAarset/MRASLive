@@ -22,17 +22,16 @@ import numpy as np
 from ngsolve import GridFunction
 
 from mras.plotting import error_figure, evolution_figure
-from mras.problems.allen_cahn import AllenCahnProblem
-from mras.problems.darcy import DarcyProblem
-from mras.problems.fisher import FisherProblem
-from mras.problems.potential import PotentialProblem
+from mras.live import list_examples
+
+_CATALOG = list_examples()
 
 PROBLEMS = {
-    "darcy": {"cls": DarcyProblem, "times": [0.001, 0.05, 0.1, 0.5, 1.5, 5.0]},
-    "fisher": {"cls": FisherProblem, "times": [0.001, 0.05, 0.1, 0.5, 1.5, 5.0]},
-    "potential": {"cls": PotentialProblem,
+    "darcy": {"cls": _CATALOG["darcy"], "times": [0.001, 0.05, 0.1, 0.5, 1.5, 5.0]},
+    "fisher": {"cls": _CATALOG["fisher"], "times": [0.001, 0.05, 0.1, 0.5, 1.5, 5.0]},
+    "potential": {"cls": _CATALOG["potential"],
                   "times": [0.001, 0.05, 0.1, 0.5, 1.5, 5.0]},
-    "allen_cahn": {"cls": AllenCahnProblem,
+    "allen_cahn": {"cls": _CATALOG["allen_cahn"],
                    "times": [0.001, 0.05, 0.075, 0.2, 0.5, 1.5, 5.0]},
 }
 
@@ -100,7 +99,7 @@ def main():
     if rows_u:
         labels = [f"{t:g}" if i else "t=0" for i, t in enumerate(times)]
         for noise_level, ru, rq in zip(noise_levels, rows_u, rows_q):
-            evolution_figure([ru, rq], prob.box, col_labels=labels,
+            evolution_figure([ru, rq], col_labels=labels,
                              row_labels=["u", "q"],
                              fname=indir
                              / (f"fields_{noise_level:g}".replace(".", "p") + ".png"))

@@ -37,8 +37,6 @@ there (Remark 4.2).
 """
 
 from collections import namedtuple
-import importlib.util
-import pathlib
 import re
 import warnings
 
@@ -48,8 +46,6 @@ from ngsolve import (BilinearForm, GridFunction, Integrate, LinearForm,
 from ngsolve.solvers import BVP, CG
 
 from .adjoint import adjoint_mismatch
-
-ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 OK, FAIL, UNVERIFIABLE, DEVIATION, ESTIMATED = (
     "ok", "fail", "unverifiable", "deviation", "estimated")
@@ -527,38 +523,13 @@ def run_checks(problem, state, error_q=None, seed=0):
 
 # -- registry -----------------------------------------------------------
 
-def _module(stem):
-    spec = importlib.util.spec_from_file_location(
-        f"{stem}_verify", ROOT / "examples" / f"{stem}.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
 def _registry():
     # built only on demand: the entries execute the example scripts and
     # pull in the whole problem library, which no other checklist call
-    # needs.
-    from mras.problems import (AllenCahnProblem, DarcyProblem, FisherProblem,
-                               PotentialProblem)
-    from mras.problems.arrhenius import (ArrheniusLinearProblem,
-                                         ArrheniusProblem)
-    return {
-        "darcy": (DarcyProblem, dict(h=0.15, dt=0.05, tend=0.5,
-                                     data_h=0.08, data_order=2)),
-        "fisher": (FisherProblem, dict(h=0.2, dt=0.05, tend=0.5,
-                                       data_h=0.15)),
-        "burgers": (_module("burgers_pipe").BurgersPipe,
-                    dict(h=0.35, dt=0.05, tend=0.5)),
-        "arrhenius": (ArrheniusProblem, dict(h=0.3, dt=0.05, tend=1.5,
-                                             data_h=0.15)),
-        "arrhenius_linear": (ArrheniusLinearProblem,
-                             dict(h=0.3, dt=0.05, tend=1.5, data_h=0.15)),
-        "potential": (PotentialProblem, dict(h=0.25, dt=0.05, tend=0.5)),
-        "allen_cahn": (AllenCahnProblem, dict(h=0.25, dt=0.05, tend=0.5)),
-        "helmholtz": (_module("helmholtz_in_parameter").HelmholtzProblem,
-                      dict(h=0.2, tend=0.4, tsteps=10)),
-    }
+    # needs.  The examples themselves declare the audit settings (the
+    # CHECK marker in each examples/*.py); mras.live collects them.
+    from mras.live import example_registry
+    return example_registry()
 
 
 def check_example(name, quick=True, seed=0):

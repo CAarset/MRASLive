@@ -20,12 +20,14 @@ import numpy as np
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from mras.problems.arrhenius import ArrheniusLinearProblem, ArrheniusProblem
+from mras.live import list_examples
+
+_CATALOG = list_examples()
 from mras.plotting import draw_field
 
 
 def q_panels(problem, qhat, axes):
-    box, mesh = problem.box, problem.mesh
+    mesh = problem.mesh
     for ax, gf, title, kw in (
             (axes[0], problem.q_true, "$q^\\dagger$",
              dict(cmap="inferno", mesh=mesh)),
@@ -33,7 +35,7 @@ def q_panels(problem, qhat, axes):
             (axes[2], qhat - problem.q_true, "$\\hat q - q^\\dagger$",
              dict(cmap="bwr", vmin=-0.5, vmax=0.5, colorbar=False,
                   mesh=mesh))):
-        draw_field(ax, gf, box, **kw)
+        draw_field(gf, ax=ax, **kw)
         ax.set_title(title, fontsize=9)
 
 
@@ -47,7 +49,8 @@ def main():
     out.mkdir(exist_ok=True)
 
     fig, axes = plt.subplots(2, 4, figsize=(13, 6.5))
-    for row, cls in enumerate((ArrheniusLinearProblem, ArrheniusProblem)):
+    for row, cls in enumerate((_CATALOG["arrhenius_linear"],
+                               _CATALOG["arrhenius"])):
         kw = {}
         if args.tend is not None:
             kw["tend"] = args.tend

@@ -28,7 +28,9 @@ import json
 import time
 from pathlib import Path
 
-from mras.problems.darcy import DarcyProblem
+from mras.live import list_examples
+
+_CATALOG = list_examples()
 
 # Paper Fig 4 time instants and Table 6 noise columns, as step indices.
 FIG_TIMES = [0.001, 0.05, 0.1, 0.5, 1.5, 5.0]
@@ -66,7 +68,7 @@ def main():
             continue
         print(f"noise_level {noise_level:g}: h={h} dt={args.dt} tend={tend} ...", flush=True)
         t0 = time.time()
-        prob = DarcyProblem(h=h, dt=args.dt, tend=tend, sample=args.sample,
+        prob = _CATALOG["darcy"](h=h, dt=args.dt, tend=tend, sample=args.sample,
                             seed=args.seed)
         prob.series_counters = tuple(series_counters)
         result = prob.run(noise_levels=[noise_level], progress=True)[-1]

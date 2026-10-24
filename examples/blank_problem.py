@@ -4,9 +4,9 @@ The worked-out model is recovery of a reaction coefficient in
 
     Dt u - Laplace u + q(x) u = g(x, t),   u = 0 on the boundary, u(0) = 0.
 
-Run it with ``python examples/blank_problem.py``: it identifies q from the
-noise-free datum and from a noise level 5% datum (``noise_level=0.05``),
-prints the theory checklist verdicts, and writes figures to
+Run it with ``python -m mras.live blank_reaction --quick``: it identifies q
+from the noise-free datum and from a noise level 5% datum
+(``noise_level=0.05``), prints the verdicts, and writes figures to
 results/blank_reaction/.
 
 What the framework requires of a problem -- everything else is yours:
@@ -28,21 +28,15 @@ still runs but reports its pairing check as unverifiable.
 """
 
 from math import pi
-from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 from netgen.geom2d import SplineGeometry
-from ngsolve import (BilinearForm, GridFunction, H1, L2, LinearForm, Mesh, dx,
-                     exp, grad, sin, x as xc, y as yc)
+from ngsolve import (BilinearForm, H1, L2, LinearForm, Mesh, dx, exp, grad,
+                     sin, x as xc, y as yc)
 
 from mras.domains import Domains
-from mras.plotting import draw_field
 from mras.scheme import Problem
-from mras.verify import run_checks
 
-BOX = ((0.0, 0.0), (10.0, 10.0))  # domain; also used for the figures
+BOX = ((0.0, 0.0), (10.0, 10.0))  # the square this demo solves on
 
 
 # --- TODO 1: mesh and trial pair ---------------------------------------------
@@ -130,32 +124,10 @@ class ReactionProblem(Problem):
         return a, res
 
 
-def main():
-    problem = ReactionProblem()
-    noisy = None
-    for noise_level in (0.0, 0.05):
-        result = problem.run_level(noise_level, progress=False)
-        kind = "noise-free" if noise_level == 0.0 else \
-            f"noise level {int(100 * noise_level)}%"
-        print(f"noise_level={noise_level:g} ({kind}): "
-              f"err_q = {result.error_q[-1]:.3f}")
-        if noise_level == 0.0:
-            for c in run_checks(problem, result.state, result.error_q):
-                print(f"  {c.name:26s} {c.status:12s} {c.detail}")
-        else:
-            noisy = result
+# --- runner registration (mras.live reads these markers) ----------------------
+# No CHECK entry: the template is the dogfood path (the runner builds and
+# runs it), not an audited ladder verdict; sizes stay small for --quick.
 
-    out = Path(__file__).resolve().parent.parent / "results" / "blank_reaction"
-    out.mkdir(parents=True, exist_ok=True)
-    q_true = GridFunction(problem.Qfes)
-    q_true.Set(problem.q_true)
-    fig, axes = plt.subplots(1, 2, figsize=(8, 3.4))
-    draw_field(axes[0], noisy.state.gfq, BOX, mesh=problem.mesh,
-               title="estimated q")
-    draw_field(axes[1], q_true, BOX, mesh=problem.mesh, title="true q")
-    fig.savefig(out / "fields.png", dpi=150, bbox_inches="tight")
-    print(f"figures in {out}")
+PROBLEM = ReactionProblem
 
-
-if __name__ == "__main__":
-    main()
+QUICK = {"blank_reaction": dict(tend=2.0)}

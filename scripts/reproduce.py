@@ -24,19 +24,19 @@ import json
 import time
 from pathlib import Path
 
-from mras.problems.allen_cahn import AllenCahnProblem
-from mras.problems.fisher import FisherProblem
-from mras.problems.potential import PotentialProblem
+from mras.live import list_examples
+
+_CATALOG = list_examples()
 
 # Per-example paper configuration: run length, main-text noise levels and
 # figure time instants (converted to step indices).  Additional noise levels from
 # the Tables 6-7 studies are available via --noise-levels.
 PROBLEMS = {
-    "fisher": {"cls": FisherProblem, "tend": 10.0, "noise_levels": [0.0, 0.03],
+    "fisher": {"cls": _CATALOG["fisher"], "tend": 10.0, "noise_levels": [0.0, 0.03],
                "times": [0.001, 0.05, 0.1, 0.5, 1.5, 5.0]},
-    "potential": {"cls": PotentialProblem, "tend": 5.0, "noise_levels": [0.0, 0.05],
+    "potential": {"cls": _CATALOG["potential"], "tend": 5.0, "noise_levels": [0.0, 0.05],
                   "times": [0.001, 0.05, 0.1, 0.5, 1.5, 5.0]},
-    "allen_cahn": {"cls": AllenCahnProblem, "tend": 5.0,
+    "allen_cahn": {"cls": _CATALOG["allen_cahn"], "tend": 5.0,
                    "noise_levels": [0.0, 0.05, 0.10, 0.20],
                    "times": [0.001, 0.05, 0.075, 0.2, 0.5, 1.5, 5.0]},
 }

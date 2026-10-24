@@ -25,7 +25,9 @@ from pathlib import Path
 
 import numpy as np
 
-from mras.problems.darcy import DarcyProblem
+from mras.live import list_examples
+
+_CATALOG = list_examples()
 
 N = 128
 
@@ -53,7 +55,7 @@ def build(path):
 
 
 def run_case(label, **kwargs):
-    prob = DarcyProblem(**kwargs)
+    prob = _CATALOG["darcy"](**kwargs)
     result = prob.run(noise_levels=[0.05], progress=False)[-1]
     return {"case": label, "final_error_u": result.final_error_u,
             "final_error_q": result.final_error_q}

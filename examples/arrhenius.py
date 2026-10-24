@@ -56,9 +56,9 @@ import numpy as np
 from ngsolve import (BilinearForm, GridFunction, LinearForm, cos, dx, exp,
                      grad, sqrt, x as xc, y as yc)
 
-from ..domains import darcy
-from ..fields import l2norm
-from ..scheme import Problem
+from mras.domains import darcy
+from mras.fields import l2norm
+from mras.scheme import Problem
 
 # Reaction-vessel size; see the scale-design note above (lambda_1 = 1/8).
 SIZE = 4.0 * pi
@@ -93,7 +93,6 @@ class _ArrheniusBase(Problem):
     stop_margin = 2.0
     sigma = 0.0  # f is affine in q: no sigma Dt z residual in the flow
     L = 0.0      # (A1) exact: f'_q(q, z) = r(z) is independent of q
-    box = ((0.0, 0.0), (SIZE, SIZE))  # domain bounding box, for figures
 
     # Reaction factor and its derivative, as CoefficientFunction maps.
     @staticmethod
@@ -258,3 +257,14 @@ class ArrheniusLinearProblem(_ArrheniusBase):
     @staticmethod
     def witness(lo):
         return 1 + lo
+
+# --- runner registration (mras.live reads these markers) ----------------------
+
+PROBLEMS = {"arrhenius": ArrheniusProblem,
+            "arrhenius_linear": ArrheniusLinearProblem}
+
+DEFAULTS = {"arrhenius": dict(h=0.3, dt=0.02, tend=10.0, data_h=0.15),
+            "arrhenius_linear": dict(h=0.3, dt=0.02, tend=10.0, data_h=0.15)}
+CHECK = {"arrhenius": dict(h=0.3, dt=0.05, tend=1.5, data_h=0.15),
+         "arrhenius_linear": dict(h=0.3, dt=0.05, tend=1.5, data_h=0.15)}
+QUICK = CHECK

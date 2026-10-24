@@ -12,10 +12,10 @@ from ngsolve import (BilinearForm, Grad, GridFunction, H1, IfPos, Integrate,
                      LinearForm, Norm, sqrt, dx, ds, x as xc, y as yc)
 from ngsolve import grad
 
-from ..domains import potential
-from ..fields import l2norm
+from mras.domains import potential
+from mras.fields import l2norm
 
-from ..scheme import Problem
+from mras.scheme import Problem
 
 NU = 0.1                    # vorticity-solve diffusion coefficient
 DECAY_T = 6.0               # time scale of the linear decay (DECAY_T - t) / DECAY_T
@@ -88,7 +88,6 @@ class PotentialProblem(Problem):
     """
 
     name = "potential"
-    box = ((-math.pi, -math.pi), (math.pi, math.pi))
     counter_start = 1
     incremental = True
     stop_margin = 2.0
@@ -191,3 +190,11 @@ class PotentialProblem(Problem):
         res += -dt * C * Grad(state.gfu) * Grad(self.v) * dx
         res += dt * C * Grad(z) * Grad(self.v) * dx
         return a, res
+
+# --- runner registration (mras.live reads these markers) ----------------------
+
+PROBLEM = PotentialProblem
+
+DEFAULTS = {"potential": dict(h=0.12, dt=0.02, tend=3.0)}
+CHECK = {"potential": dict(h=0.25, dt=0.05, tend=0.5)}
+QUICK = CHECK

@@ -9,10 +9,10 @@ FEM noise of :mod:`mras.noise`.
 from ngsolve import (BilinearForm, Grad, GridFunction, IfPos, Integrate,
                      LinearForm, sqrt, sin, pi, dx, ds, x as xc, y as yc)
 
-from ..domains import allen_cahn
-from ..fields import l2norm
+from mras.domains import allen_cahn
+from mras.fields import l2norm
 
-from ..scheme import Problem
+from mras.scheme import Problem
 
 DECAY_T = 10.0              # time scale of the linear decay (DECAY_T - t) / DECAY_T
 OFFSET = 1.0                # positive offset required by the analysis
@@ -37,7 +37,6 @@ class AllenCahnProblem(Problem):
     """
 
     name = "allen_cahn"
-    box = ((-2.0, -1.0), (2.0, 1.0))
     counter_start = 1
     incremental = True
     stop_margin = 2.0
@@ -142,3 +141,11 @@ class AllenCahnProblem(Problem):
         res += -dt * C * Grad(state.gfu) * Grad(self.v) * dx
         res += dt * C * Grad(z) * Grad(self.v) * dx
         return a, res
+
+# --- runner registration (mras.live reads these markers) ----------------------
+
+PROBLEM = AllenCahnProblem
+
+DEFAULTS = {"allen_cahn": dict(h=0.12, dt=0.02, tend=3.0)}
+CHECK = {"allen_cahn": dict(h=0.25, dt=0.05, tend=0.5)}
+QUICK = CHECK

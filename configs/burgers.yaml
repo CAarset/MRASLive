@@ -1,5 +1,5 @@
 # Burgers pipe sweep for examples/burgers_pipe.py:
-#   .venv/bin/python examples/burgers_pipe.py --config configs/burgers.yaml
+#   .venv/bin/python -m mras.live burgers_pipe --config configs/burgers.yaml
 defaults:
   dt: 0.01
   tend: 10.0

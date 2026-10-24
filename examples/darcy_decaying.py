@@ -8,10 +8,12 @@ a sequential scheme, unlike the joint ``mras.Problem`` solve of the paper's
 benchmarks.  No (z - z_old)/dt term appears: the sigma coupling it would
 feed is zero here.
 
-    .venv/bin/python examples/darcy_decaying.py --quick
+    .venv/bin/python examples/darcy_decaying.py
+
+Not a ``mras.Problem`` instance -- a stepper-level demo kept for the
+sequential-implicit comparison; edit the sizes in ``main`` to scale.
 """
 
-import argparse
 from pathlib import Path
 
 import matplotlib
@@ -90,40 +92,30 @@ def identify(dt, tsteps, noise_levels, mesh, Ufes, Qfes, q_true, u_exact, u_init
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--h", type=float, default=0.06)
-    ap.add_argument("--tend", type=float, default=1.5)
-    ap.add_argument("--tsteps", type=int, default=100)
-    ap.add_argument("--sample", type=int, default=0)
-    ap.add_argument("--noise-levels", type=float, nargs="+", default=[0.0, 0.03])
-    ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--quick", action="store_true", help="small sizes, seconds")
-    ap.add_argument("--out", default="results/darcy_decaying")
-    args = ap.parse_args()
-    if args.quick:
-        args.h, args.tend, args.tsteps = 0.2, 0.05, 20
-    out = Path(args.out)
+    h, tend, tsteps, sample = 0.2, 0.05, 20, 0  # laptop-sized; edit to scale
+    noise_levels, seed = [0.0, 0.03], 0
+    out = Path(__file__).resolve().parent.parent / "results" / "darcy_decaying"
     out.mkdir(parents=True, exist_ok=True)
 
-    rng = np.random.default_rng(args.seed)
-    grids = [rng.random((128, 128)) for _ in range(args.tsteps + 1)]
+    rng = np.random.default_rng(seed)
+    grids = [rng.random((128, 128)) for _ in range(tsteps + 1)]
 
-    dom = darcy(maxh=args.h, order_u=3, order_q=0)
+    dom = darcy(maxh=h, order_u=3, order_q=0)
     mesh, Ufes, Qfes = dom.mesh, dom.Ufes, dom.Qfes
-    noise = GaussianFEMNoise(Ufes, seed=args.seed)
-    dt = args.tend / args.tsteps
-    q_true = to_gridfunc0(load_nu_grid(sample=args.sample), Qfes)
-    V = darcy(maxh=args.h, order_u=2, order_q=0).Ufes
-    u_exact = reference(dt, args.tsteps, q_true, Ufes, V, grids)
+    noise = GaussianFEMNoise(Ufes, seed=seed)
+    dt = tend / tsteps
+    q_true = to_gridfunc0(load_nu_grid(sample=sample), Qfes)
+    V = darcy(maxh=h, order_u=2, order_q=0).Ufes
+    u_exact = reference(dt, tsteps, q_true, Ufes, V, grids)
     # The data loop leaves the source at its last random grid; the
     # identification then drives the estimator with that constant field.
     source = to_gridfunc(grids[-1], Ufes)
     u_init = to_gridfunc(grids[0], Ufes)
 
     fig, axes = plt.subplots(1, 2, figsize=(9, 3.2))
-    for noise_level, eu, eq in identify(dt, args.tsteps, args.noise_levels, mesh, Ufes,
-                                  Qfes, q_true, u_exact, u_init, source,
-                                  noise):
+    for noise_level, eu, eq in identify(dt, tsteps, noise_levels, mesh, Ufes,
+                                        Qfes, q_true, u_exact, u_init, source,
+                                        noise):
         t = dt * np.arange(len(eu))
         axes[0].plot(t, eu, label=f"noise_level={noise_level:g}")
         axes[1].plot(t, eq, label=f"noise_level={noise_level:g}")
@@ -139,9 +131,8 @@ def main():
     fig.savefig(out / "errors.png", dpi=150, bbox_inches="tight")
 
     fig, axes = plt.subplots(1, 2, figsize=(8, 3.4))
-    draw_field(axes[0], u_exact[-1], ((0, 0), (1, 1)), title="u(T)")
-    draw_field(axes[1], q_true, ((0, 0), (1, 1)), title="q true")
-    fig.tight_layout()
+    draw_field(u_exact[-1], ax=axes[0], title="u(T)")
+    draw_field(q_true, ax=axes[1], title="q true")
     fig.savefig(out / "fields.png", dpi=150, bbox_inches="tight")
     print(f"figures and npz files in {out}")
 

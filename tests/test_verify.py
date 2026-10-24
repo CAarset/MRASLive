@@ -32,12 +32,16 @@ import pytest
 from ngsolve import BilinearForm, LinearForm, dx, grad
 
 from mras.domains import darcy
-from mras.problems import AllenCahnProblem, DarcyProblem
-from mras.problems.arrhenius import _ArrheniusBase
+from mras.live import load_example
 from mras.scheme import Problem, TheorySpecError
 from mras.verify import (DEVIATION, ESTIMATED, FAIL, OK, UNVERIFIABLE,
                          _datum_array, _datum_cells_mean, check_example,
                          run_checks)
+
+# The examples live in examples/ and are loaded by the runner, not imported.
+AllenCahnProblem = load_example("allen_cahn").PROBLEM
+DarcyProblem = load_example("darcy").PROBLEM
+_ArrheniusBase = load_example("arrhenius")._ArrheniusBase
 
 EXPECTED = {
     "darcy": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
@@ -46,9 +50,9 @@ EXPECTED = {
     "fisher": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
                "(A2)": FAIL, "(A3)": UNVERIFIABLE, "persistent": OK,
                "reconstruction": OK, "seeded": OK},
-    "burgers": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
-                "(A2)": FAIL, "(A3)": UNVERIFIABLE, "persistent": OK,
-                "reconstruction": FAIL, "seeded": OK},
+    "burgers_pipe": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
+                     "(A2)": FAIL, "(A3)": UNVERIFIABLE, "persistent": OK,
+                     "reconstruction": FAIL, "seeded": OK},
     "arrhenius": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
                   "(A2)": OK, "(A3)": OK, "persistent": OK,
                   "reconstruction": OK, "seeded": OK},

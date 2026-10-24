@@ -25,18 +25,13 @@ as for Darcy; (A2) is left unverified exactly as the paper leaves it for
 Darcy (Remark 4.2), and the heater grid is its discrete persistent-
 excitation surrogate.  See docs/DEVIATIONS.md for the full audit.
 
-    .venv/bin/python examples/burgers_pipe.py --quick
-    .venv/bin/python examples/burgers_pipe.py --config configs/burgers.yaml
+    .venv/bin/python -m mras.live burgers_pipe --quick
+    .venv/bin/python -m mras.live burgers_pipe --config configs/burgers.yaml
 """
-
-import argparse
-from pathlib import Path
 
 from ngsolve import BilinearForm, LinearForm, dx, exp, grad, pi, sin, sqrt, x, y, IfPos
 
-from mras.config import RunConfig, build, load_yaml
 from mras.domains import burgers_pipe
-from mras.plotting import error_figure, evolution_figure
 from mras.scheme import Problem
 
 LENGTH, HEIGHT = 6.0, 1.2
@@ -121,7 +116,6 @@ class BurgersPipe(Problem):
     """Identify q in Burgers flow from generated noisy state observations."""
 
     name = "burgers_pipe"
-    box = ((0.0, 0.0), (LENGTH, HEIGHT))
     # f(q, z) = -div(q grad z) + (z grad z) is affine in q: sigma = 0 and
     # L = 0 exactly; (A2) shares the Darcy situation -- mras/verify.py.
     sigma = 0.0
@@ -184,46 +178,10 @@ class BurgersPipe(Problem):
         return a, res
 
 
-def run(cfg):
-    prob = build(BurgersPipe, cfg, series_counters=cfg.counters())
-    results = prob.run(cfg.noise_levels)
-    out = Path(cfg.out or "results/burgers_pipe")
-    out.mkdir(parents=True, exist_ok=True)
-    print(f"\n{'noise_level':>7} {'err_u':>9} {'err_q':>9} {'misfit':>9}")
-    for res in results:
-        res.save(out)
-        print(f"{res.noise_level:>6g} {res.final_error_u:>9.4f} "
-              f"{res.final_error_q:>9.4f} {res.misfit_u[-1]:>9.4f}")
-    error_figure(results, prob.dt, fname=out / "errors.png")
-    evolution_figure([[r.state.gfu for r in results],
-                      [r.state.gfq for r in results]], prob.box,
-                     col_labels=[f"{r.noise_level:g}" for r in results],
-                     row_labels=["u", "q"], fname=out / "final_fields.png")
-    print(f"results and figures in {out}")
-    return results
+# --- runner registration (mras.live reads these markers) ----------------------
 
+PROBLEM = BurgersPipe
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--config", help="YAML run configuration (see mras.config)")
-    ap.add_argument("--h", type=float, default=0.15)
-    ap.add_argument("--dt", type=float, default=1e-2)
-    ap.add_argument("--tend", type=float, default=100.0)
-    ap.add_argument("--noise-levels", type=float, nargs="+", default=[0.0, 0.05])
-    ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--quick", action="store_true", help="small sizes, seconds")
-    args = ap.parse_args()
-
-    if args.config:
-        for cfg in load_yaml(args.config):
-            run(cfg)
-        return
-    cfg = RunConfig(h=0.35, dt=0.02, tend=0.6, noise_levels=[0.0, 0.1], seed=0,
-                    out="results/burgers_pipe_quick") if args.quick else \
-        RunConfig(h=args.h, dt=args.dt, tend=args.tend,
-                  noise_levels=args.noise_levels, seed=args.seed)
-    run(cfg)
-
-
-if __name__ == "__main__":
-    main()
+DEFAULTS = {"burgers_pipe": dict(h=0.35, dt=0.02, tend=100.0)}
+CHECK = {"burgers_pipe": dict(h=0.35, dt=0.05, tend=0.5)}
+QUICK = CHECK

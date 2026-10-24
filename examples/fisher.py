@@ -4,10 +4,10 @@ import numpy as np
 from ngsolve import (BilinearForm, GridFunction, Grad, IfPos,
                      LinearForm, cos, dx, exp, x as xc, y as yc)
 
-from ..domains import fisher
+from mras.domains import fisher
 
-from ..scheme import Problem
-from ..stepper import ImplicitStepper
+from mras.scheme import Problem
+from mras.stepper import ImplicitStepper
 
 R_IN, R_OUT = 0.5, 0.9      # ring radii of the true permeability
 Q_IN, Q_OUT = 1.0, 0.25     # ring / exterior coefficient values
@@ -28,7 +28,6 @@ class FisherProblem(Problem):
     """
 
     name = "fisher"
-    box = ((-1.25, -1.25), (1.25, 1.25))
     counter_start = 1
     stop_margin = 2.0
 
@@ -122,3 +121,11 @@ class FisherProblem(Problem):
         res += dt * (state.g - state.z + state.z * state.z) * self.v * dx
         res += dt * Grad(state.z) * Grad(self.v) * dx
         return a, res
+
+# --- runner registration (mras.live reads these markers) ----------------------
+
+PROBLEM = FisherProblem
+
+DEFAULTS = {"fisher": dict(h=0.1, dt=0.02, tend=3.0)}
+CHECK = {"fisher": dict(h=0.2, dt=0.05, tend=0.5, data_h=0.15)}
+QUICK = CHECK

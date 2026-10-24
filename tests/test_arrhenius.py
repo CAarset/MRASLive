@@ -19,7 +19,7 @@ below the paper's Darcy Table 6 band (0.33).
 
 import pytest
 
-from mras.problems.arrhenius import ArrheniusLinearProblem, ArrheniusProblem
+from mras.live import build
 
 MICRO = dict(h=0.4, dt=0.02, tend=0.4, data_h=0.3, data_order=2)
 RECOVERY = dict(h=0.4, dt=0.02, tend=8.0)
@@ -27,13 +27,13 @@ RECOVERY = dict(h=0.4, dt=0.02, tend=8.0)
 
 @pytest.fixture(scope="module")
 def exponential():
-    prob = ArrheniusProblem(**RECOVERY)
+    prob = build("arrhenius", **RECOVERY)
     return prob, prob.run_level(0.0, progress=False)
 
 
 @pytest.fixture(scope="module")
 def linearised():
-    prob = ArrheniusLinearProblem(**RECOVERY)
+    prob = build("arrhenius_linear", **RECOVERY)
     return prob, prob.run_level(0.0, progress=False)
 
 
@@ -81,12 +81,12 @@ def test_linearisation_limit_agrees():
     must reach the same accuracy.  The accuracy itself is poor here by
     design - the estimator gain is the squared reaction amplitude, so the
     persistent-excitation margin vanishes with the forcing (rate ~ r^2,
-    module docstring of mras/problems/arrhenius.py).  What is pinned is
+    module docstring of examples/arrhenius.py).  What is pinned is
     the consistency of the linearisation, not recovery.
     """
     tiny = dict(h=0.35, dt=0.05, tend=1.0, amplitude=0.05)
-    res_exp = ArrheniusProblem(**tiny).run_level(0.0, progress=False)
-    res_lin = ArrheniusLinearProblem(**tiny).run_level(0.0, progress=False)
+    res_exp = build("arrhenius", **tiny).run_level(0.0, progress=False)
+    res_lin = build("arrhenius_linear", **tiny).run_level(0.0, progress=False)
     err_exp, err_lin = float(res_exp.error_q[-1]), float(res_lin.error_q[-1])
     assert abs(err_exp - err_lin) < 0.05, (err_exp, err_lin)
     assert max(err_exp, err_lin) < 1.0, (err_exp, err_lin)
@@ -95,7 +95,7 @@ def test_linearisation_limit_agrees():
 def test_feedback_decays_from_high_estimate():
     """The parameter flow q_t = r(z) (u - z) is a stable feedback: an
     estimate started above the truth decays towards it, never blows up."""
-    prob = ArrheniusProblem(h=0.4, dt=0.05, tend=1.5)
+    prob = build("arrhenius", h=0.4, dt=0.05, tend=1.5)
     prob.initial_guess = lambda: 1.5
     result = prob.run_level(0.0, progress=False)
     assert result.error_q[-1] < 0.95 * result.error_q[0]
@@ -103,8 +103,8 @@ def test_feedback_decays_from_high_estimate():
 
 
 def test_registered_as_live_examples():
-    from mras.live import EXAMPLES, build
-    assert {"arrhenius", "arrhenius_linear"} <= set(EXAMPLES)
+    from mras.live import list_examples
+    assert {"arrhenius", "arrhenius_linear"} <= set(list_examples())
     for name in ("arrhenius", "arrhenius_linear"):
         result = build(name, **MICRO).run_level(0.0, progress=False)
         assert result.error_q is not None

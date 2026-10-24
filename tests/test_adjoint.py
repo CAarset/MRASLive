@@ -19,40 +19,24 @@ the tests pin down that status quo rather than paper over it:
   exists by construction.
 """
 
-import importlib.util
-import pathlib
-
 import pytest
 
 from mras.adjoint import adjoint_mismatch
-from mras.problems import (AllenCahnProblem, DarcyProblem, FisherProblem,
-                           PotentialProblem)
-from mras.problems.arrhenius import ArrheniusLinearProblem, ArrheniusProblem
-
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+from mras.live import build, load_example
 
 BUILDERS = {
-    "darcy": lambda: DarcyProblem(h=0.15, dt=0.05, tend=0.5,
-                                  data_h=0.08, data_order=2),
-    "fisher": lambda: FisherProblem(h=0.2, dt=0.05, tend=0.5,
-                                    data_h=0.15, data_order=2),
-    "burgers": lambda: _example("burgers_pipe").BurgersPipe(
-        h=0.35, dt=0.05, tend=0.5),
-    "arrhenius": lambda: ArrheniusProblem(h=0.4, dt=0.05, tend=0.5,
-                                          data_h=0.2),
-    "arrhenius_linear": lambda: ArrheniusLinearProblem(
-        h=0.4, dt=0.05, tend=0.5, data_h=0.2),
-    "potential": lambda: PotentialProblem(h=0.25, dt=0.05, tend=0.5),
-    "allen_cahn": lambda: AllenCahnProblem(h=0.25, dt=0.05, tend=0.5),
+    "darcy": lambda: build("darcy", h=0.15, dt=0.05, tend=0.5,
+                           data_h=0.08, data_order=2),
+    "fisher": lambda: build("fisher", h=0.2, dt=0.05, tend=0.5,
+                            data_h=0.15, data_order=2),
+    "burgers_pipe": lambda: build("burgers_pipe", h=0.35, dt=0.05, tend=0.5),
+    "arrhenius": lambda: build("arrhenius", h=0.4, dt=0.05, tend=0.5,
+                               data_h=0.2),
+    "arrhenius_linear": lambda: build("arrhenius_linear", h=0.4, dt=0.05,
+                                      tend=0.5, data_h=0.2),
+    "potential": lambda: build("potential", h=0.25, dt=0.05, tend=0.5),
+    "allen_cahn": lambda: build("allen_cahn", h=0.25, dt=0.05, tend=0.5),
 }
-
-
-def _example(stem):
-    path = ROOT / "examples" / f"{stem}.py"
-    spec = importlib.util.spec_from_file_location(f"{stem}_adjoint", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def _run_adjoinable(name):
@@ -62,7 +46,7 @@ def _run_adjoinable(name):
 
 
 @pytest.mark.parametrize("name", [
-    "darcy", "fisher", "burgers", "arrhenius", "arrhenius_linear"])
+    "darcy", "fisher", "burgers_pipe", "arrhenius", "arrhenius_linear"])
 def test_exact_adjoint_coupling_is_machine_precise(name):
     report = _run_adjoinable(name)
     aligned = report["aligned"]
@@ -92,7 +76,7 @@ def test_helmholtz_self_step_has_no_adjoint_pair():
     appears nowhere in the truth model and its step is the quadratic
     self-step, so the harness must flag the cross blocks as a pair that
     fails (not as a vacuous pass)."""
-    problem = _example("helmholtz_in_parameter").HelmholtzProblem(
+    problem = load_example("helmholtz_in_parameter").PROBLEM(
         h=0.2, tend=0.3, tsteps=12)
     result = problem.run_level(0.0, progress=False)
     report = adjoint_mismatch(problem, result.state)

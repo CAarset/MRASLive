@@ -1,70 +1,39 @@
-"""Matplotlib rendering of MRAS results: field panels and error curves.
+"""Rendering of MRAS results: ngsplot FEM panels, matplotlib error curves.
 
-Fields are evaluated on a pixel grid and drawn with ``imshow``, which is
-resolution-independent and needs no ngsolve plotting windows.
+Fields are painted with ``ngsplot.Plot`` -- the finite element renderer that
+reproduces the webgui's shader -- so a figure shows the FEM representation
+itself: an L2 field of cellwise constants appears in its true bands, not as
+a vertex-interpolated smear, and nothing is point-sampled outside the mesh.
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
-from netgen.libngpy._meshing import NgException
+from ngsplot import Plot
 
-__all__ = ["sample_field", "draw_field", "evolution_figure", "error_figure"]
+__all__ = ["draw_field", "evolution_figure", "error_figure"]
 
 
-def sample_field(gf, box, n=128, mesh=None):
-    """Evaluate a field on an n x n grid over ``box`` -> (x, y, Z).
+def draw_field(field, ax=None, mesh=None, cmap="viridis", vmin=None,
+               vmax=None, title=None, colorbar=True, **kwargs):
+    """Draw one field into ``ax`` and return the axes.
 
-    Accepts a GridFunction or any CoefficientFunction built from one.
-    Grid points outside the mesh (e.g. the corners around a disk) are NaN
-    where point evaluation fails, which imshow renders transparent; note
-    that a CoefficientFunction expression evaluates analytically outside
-    the mesh instead of failing, so pass it only over a box-shaped mesh.
-    A pure CoefficientFunction (no grid function at all) exposes no mesh
-    attribute, so pass ``mesh`` for it.
+    ``field`` is a GridFunction, or a CoefficientFunction plus the ``mesh``
+    it lives on.  Extra keywords go to ``ngsplot.Plot`` (``width``,
+    ``height``, view angles, ...).
     """
-    lo, hi = box
-    xs = np.linspace(lo[0], hi[0], n)
-    ys = np.linspace(lo[1], hi[1], n)
-    points_on = getattr(gf, "mesh", mesh)
-
-    def at(x, y):
-        try:
-            # a plain grid function returns a float here; an expression
-            # with a CoefficientFunction (e.g. an analytic q_true) returns
-            # a point-evaluation functional instead, which the MeshPoint
-            # overload below evaluates
-            return float(gf(float(x), float(y)))
-        except NgException:
-            return np.nan
-        except TypeError:
-            if points_on is None:
-                raise TypeError(
-                    "sample_field: this field needs a mesh for point "
-                    "evaluation, pass mesh=...") from None
-            return float(gf(points_on(float(x), float(y))))
-
-    Z = np.array([[at(x, y) for x in xs] for y in ys])
-    return xs, ys, Z
-
-
-def draw_field(ax, gf, box, n=128, cmap="viridis", vmin=None, vmax=None,
-               title=None, colorbar=True, mesh=None):
-    """Draw one field into ``ax`` and return the mappable."""
-    xs, ys, Z = sample_field(gf, box, n, mesh=mesh)
-    im = ax.imshow(Z, origin="lower", extent=[xs[0], xs[-1], ys[0], ys[-1]],
-                   cmap=cmap, vmin=vmin, vmax=vmax, aspect="auto")
+    ax = plt.gca() if ax is None else ax
+    rng = ({"autoscale": False, "vmin": vmin, "vmax": vmax}
+           if vmin is not None else {"autoscale": True})
+    Plot(field, ax=ax, mesh=mesh, cmap=cmap, colorbar=colorbar, **rng,
+         **kwargs)
     if title:
         ax.set_title(title)
-    ax.set_xticks(())
-    ax.set_yticks(())
-    if colorbar:
-        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    return im
+    return ax
 
 
-def evolution_figure(rows, box, col_labels=None, row_labels=None,
-                     fname=None, n=128, cmap="viridis",
-                     figsize_per=(3.2, 2.6), mesh=None):
+def evolution_figure(rows, col_labels=None, row_labels=None, fname=None,
+                     mesh=None, cmap="viridis", figsize_per=(4.8, 3.6),
+                     **kwargs):
     """One panel per field; ``rows`` is a list of lists of grid functions.
 
     Colours are normalised per row, matching the parameter/state panel
@@ -76,10 +45,9 @@ def evolution_figure(rows, box, col_labels=None, row_labels=None,
                                       figsize_per[1] * nrows),
                              squeeze=False)
     for i, row in enumerate(rows):
-        vals = [np.asarray(sample_field(gf, box, 32, mesh=mesh)[2])
-                for gf in row]
-        vmin = min(np.nanmin(v) for v in vals)
-        vmax = max(np.nanmax(v) for v in vals)
+        values = [np.asarray(gf.vec.FV().NumPy()) for gf in row]
+        vmin = min(float(v.min()) for v in values)
+        vmax = max(float(v.max()) for v in values)
         for j, gf in enumerate(row):
             label = None
             if row_labels and col_labels:
@@ -88,11 +56,11 @@ def evolution_figure(rows, box, col_labels=None, row_labels=None,
                 label = col_labels[j]
             elif row_labels:
                 label = row_labels[i]
-            draw_field(axes[i][j], gf, box, n=n, cmap=cmap,
+            draw_field(gf, ax=axes[i][j], mesh=mesh, cmap=cmap,
                        vmin=vmin, vmax=vmax, title=label,
-                       colorbar=(j == ncols - 1), mesh=mesh)
+                       colorbar=(j == ncols - 1), **kwargs)
         for j in range(len(row), ncols):
-            axes[i][j].axis("off")
+            axes[i][j].set_visible(False)
     fig.tight_layout()
     if fname:
         fig.savefig(fname, dpi=150, bbox_inches="tight")
@@ -118,7 +86,7 @@ def error_figure(results, dt, fname=None, log=True, labels=None):
                 ax.set_yscale("log")
             ax.set_xlabel("t")
             ax.set_ylabel(rf"$\|e_{{{name}}}\|$")
-            tag = labels[i] if labels else f"level {res.noise_level:g}"
+            tag = labels[i] if labels else f"noise_level={res.noise_level:g}"
             ax.set_title(f"{res.problem} {tag}")
     fig.tight_layout()
     if fname:

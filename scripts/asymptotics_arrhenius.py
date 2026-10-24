@@ -17,9 +17,11 @@ import time
 
 import numpy as np
 
-from mras.problems.arrhenius import ArrheniusLinearProblem, ArrheniusProblem
+from mras.live import list_examples
 
-MEMBERS = {"linear": ArrheniusLinearProblem, "exp": ArrheniusProblem}
+_CATALOG = list_examples()
+MEMBERS = {"linear": _CATALOG["arrhenius_linear"],
+           "exp": _CATALOG["arrhenius"]}
 
 
 def main(member="exp", tend=100.0):

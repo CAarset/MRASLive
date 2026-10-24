@@ -5,22 +5,18 @@ Shows the headline workflow: bring your own mesh and weak forms. The model
 here is u_t = nu Laplacian u + g(t) with the datum-driven parameter step
 (sigma = 0, diffusion nu = 5, zero ground-truth parameter).
 
-    .venv/bin/python examples/helmholtz_in_parameter.py --quick
+    .venv/bin/python -m mras.live helmholtz --quick
 
 
 CLEANUP-FLAG (pre-push): placeholder for the scalar-q Helmholtz
 rework (docs/ASSUMPTIONS.md section 6); deleting it also drops the
-mras/verify.py registry line and the tests/test_verify.py row.
+runner registration below and the tests/test_verify.py row.
 """
-
-import argparse
-from pathlib import Path
 
 from ngsolve import BilinearForm, GridFunction, LinearForm, Parameter
 from ngsolve import dx, exp, grad, x, y
 
 from mras.domains import darcy
-from mras.plotting import error_figure, evolution_figure
 from mras.scheme import Problem
 from mras.stepper import ImplicitStepper
 
@@ -96,38 +92,8 @@ class HelmholtzProblem(Problem):
         return a, res
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--h", type=float, default=0.08)
-    ap.add_argument("--tend", type=float, default=1.5)
-    ap.add_argument("--tsteps", type=int, default=1000)
-    ap.add_argument("--noise-levels", type=float, nargs="+", default=[0.0, 0.05])
-    ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--quick", action="store_true", help="small sizes, seconds")
-    ap.add_argument("--out", default="results/helmholtz")
-    args = ap.parse_args()
+# --- runner registration (mras.live reads these markers) ----------------------
 
-    if args.quick:
-        args.h, args.tend, args.tsteps = 0.2, 0.03, 20
-    out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
+PROBLEM = HelmholtzProblem
 
-    prob = HelmholtzProblem(h=args.h, tend=args.tend, tsteps=args.tsteps,
-                            seed=args.seed)
-    results = prob.run(args.noise_levels)
-    for res in results:
-        res.save(out)
-        print(f"noise_level={res.noise_level:g}: err_u={res.final_error_u:.4f} "
-              f"err_q={res.final_error_q:.4f}")
-
-    error_figure(results, prob.dt, fname=out / "errors.png")
-    evolution_figure([[r.state.gfu for r in results],
-                      [r.state.gfq for r in results]],
-                     ((0, 0), (1, 1)), col_labels=[f"{r.noise_level:g}"
-                                                   for r in results],
-                     row_labels=["u", "q"], fname=out / "final_fields.png")
-    print(f"figures and npz files in {out}")
-
-
-if __name__ == "__main__":
-    main()
+QUICK = CHECK = {"helmholtz": dict(h=0.2, tend=0.4, tsteps=10)}

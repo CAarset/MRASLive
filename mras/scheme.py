@@ -128,7 +128,6 @@ class Problem:
     """
 
     name = "problem"
-    box = ((0.0, 0.0), (1.0, 1.0))  # domain bounding box, for field figures
     tstart = 0.0
     counter_start = 1
     incremental = False

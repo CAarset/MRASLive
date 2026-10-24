@@ -4,12 +4,12 @@ import numpy as np
 from ngsolve import (BilinearForm, GridFunction, Grad, LinearForm, dx, pi, sin,
                      x as xc, y as yc)
 
-from ..data.pdebench import load_nu_grid
-from ..domains import darcy
-from ..fields import to_gridfunc, to_gridfunc0
-from ..noise import seeded_rng
-from ..scheme import Problem
-from ..stepper import ImplicitStepper
+from mras.data.pdebench import load_nu_grid
+from mras.domains import darcy
+from mras.fields import to_gridfunc, to_gridfunc0
+from mras.noise import seeded_rng
+from mras.scheme import Problem
+from mras.stepper import ImplicitStepper
 
 DATA_H = 0.03       # ground-truth mesh width (finer than the design mesh)
 DATA_ORDER = 4      # ground-truth polynomial order
@@ -127,3 +127,12 @@ class DarcyProblem(Problem):
         res += state.gfq * self.s * dx
         res += dt * Grad(state.z_old) * (Grad(state.gfu) - Grad(state.z_old)) * self.s * dx
         return a, res
+
+# --- runner registration (mras.live reads these markers) ----------------------
+
+PROBLEM = DarcyProblem
+
+DEFAULTS = {"darcy": dict(h=0.08, dt=0.02, tend=2.0,
+                          data_h=0.06, data_order=2)}
+CHECK = {"darcy": dict(h=0.15, dt=0.05, tend=0.5, data_h=0.08, data_order=2)}
+QUICK = CHECK

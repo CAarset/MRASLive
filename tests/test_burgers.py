@@ -45,6 +45,8 @@ def test_burgers_forward_generation_and_tracking():
 
 
 def test_burgers_config_yaml():
-    cfgs = load_yaml(ROOT / "configs" / "burgers.yaml")
-    assert len(cfgs) >= 2
-    assert all(c.h > 0 and c.dt > 0 and c.noise_levels for c in cfgs)
+    defaults, runs = load_yaml(ROOT / "configs" / "burgers.yaml")
+    assert len(runs) >= 2
+    assert defaults["dt"] > 0 and defaults["tend"] > 0
+    assert defaults["noise_levels"]
+    assert all(r["h"] > 0 and r["seed"] == 0 for r in runs)
