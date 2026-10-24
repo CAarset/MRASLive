@@ -11,11 +11,16 @@ license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "ngsolve>=6.2",
+    "ngsplot",  # pictures; unpublished on PyPI -- resolve it from the local
+                # checkout below, or `pip install -e ../ngsplot`
     "numpy",
     "matplotlib",
     "pydantic>=2",
     "PyYAML",
 ]
+
+[tool.uv.sources]
+ngsplot = { path = "../ngsplot", editable = true }
 
 [project.optional-dependencies]
 pdebench = ["h5py"]
