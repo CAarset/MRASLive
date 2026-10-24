@@ -139,3 +139,15 @@ checkpoint commit 4749311).
   implementation notes, PAPER_TARGETS.md as table reference). Micro probes
   confirm fixed-point consistency (clean exact-q runs stay at the
   discretisation floor) and noise-ordered error plateaus.
+- 2026-10-24 — Examples unification (supersedes the Target layout above):
+  `mras/problems/` dissolved into `examples/` — every problem lives in
+  `examples/` directly, declaring its `PROBLEM`/`PROBLEMS` class marker
+  plus `DEFAULTS` (construction), `QUICK` (cheap check) and `CHECK`
+  (checklist) sizes. All argument handling sits in `mras/live.py`, which
+  also owns the loader, catalog and layered runner
+  (constructor signature < DEFAULTS < --quick < YAML defaults < YAML runs
+  < CLI), so example files stay untouched once a problem is well-formed
+  and the YAML is the control switch. All field rendering goes through
+  `ngsplot.Plot` (editable install of the local checkout required, see
+  README); the notebook streams six live ngsplot panels during the solve
+  and delivers an animated HTML movie at the end.

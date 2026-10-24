@@ -21,9 +21,9 @@ grep -rn "CLEANUP-FLAG" --include="*.py" .   # everything flagged
 | `examples/helmholtz_in_parameter.py` | Helmholtz "identifies nothing" placeholder | superseded by the scalar-q rework of `docs/ASSUMPTIONS.md` section 6 |
 
 Not flagged (user path or the paper-figure toolchain that consumes stored
-`results/` artefacts): `mras/` incl. `stepper.py` and `data/`,
-`examples/blank_problem.py`, `examples/burgers_pipe.py`,
-`examples/darcy_decaying.py`, `examples/paper_problems.py`,
+`results/` artefacts): `mras/` incl. `stepper.py` and `data/`, the
+`examples/` problem files (`darcy.py` … `helmholtz` excepted) plus
+`examples/blank_problem.py` and `examples/darcy_decaying.py`,
 `scripts/checklist.py`, `scripts/demo_arrhenius.py`,
 `scripts/make_figures.py`, `mras_live.ipynb`, `configs/`, `tests/`.
 
@@ -32,9 +32,10 @@ Not flagged (user path or the paper-figure toolchain that consumes stored
 Deleting the flagged files is not self-contained; the push-cleanup commit
 must also
 
-1. drop the `"helmholtz"` line from `_registry()` in `mras/verify.py` and
-   the `"helmholtz"` row of `EXPECTED` in `tests/test_verify.py`, plus the
-   Helmholtz case in `tests/test_adjoint.py`;
+1. drop the `"helmholtz"` row of `EXPECTED` in `tests/test_verify.py` and
+   the Helmholtz case in `tests/test_adjoint.py`; the catalog and the
+   checklist registry pick the example up from its file, so deleting
+   `examples/helmholtz_in_parameter.py` removes it from both;
 2. drop the "Reproduce the paper's figures" table from `README.md` (it
    routes through the two reproduce scripts) — or keep the scripts until
    the paper revision ships, which is the current intent;

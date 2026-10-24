@@ -23,6 +23,9 @@ numerically verifiable (see the checklist below).
 python3 -m venv .venv
 .venv/bin/pip install -e ".[pdebench,notebook,dev]"  # ngsolve, numpy, matplotlib,
                                                      # pydantic, h5py, anywidget, pytest
+.venv/bin/pip install -e ../ngsplot  # FEM renderer behind every figure; clone
+                                     # beside this repo if missing:
+                                     # git clone https://github.com/CAarset/ngsplot
 ```
 
 The Darcy benchmark reads one PDEBench file:
@@ -37,11 +40,11 @@ curl -L -o data/2D_DarcyFlow_beta100.0_Train.hdf5 \
 ## Quickstart
 
 ```python
-from mras.problems.darcy import DarcyProblem
+from mras.live import build
 from mras.plotting import error_figure
 
-prob = DarcyProblem(h=0.04, dt=1e-3, tend=5.0)      # mesh + orders + data
-results = prob.run(noise_levels=[0.0, 0.05])        # noisy data -> MRAS loop
+prob = build("darcy", h=0.04, dt=1e-3, tend=5.0)  # example DEFAULTS, overridden
+results = prob.run(noise_levels=[0.0, 0.05])      # noisy data -> MRAS loop
 for r in results:
     print(r.noise_level, r.final_error_u, r.final_error_q)
 error_figure(results, prob.dt, fname="errors.png")
@@ -50,10 +53,20 @@ error_figure(results, prob.dt, fname="errors.png")
 `noise_level` is always a fraction: `0.0` is noise-free, `0.05` is noise
 level 5%.
 
+Or end to end from the shell, saving figures and error histories under
+`results/<name>/` as it goes — the runner owns all argument handling, the
+examples themselves have none:
+
+```bash
+.venv/bin/python -m mras.live darcy --h 0.04 --dt 1e-3 --tend 5
+```
+
 ## Live notebook
 
-`notebooks/mras_live.ipynb` runs one noise level and stitches the frames
-into a fixed-framerate mp4 with static colorbars —
+`notebooks/mras_live.ipynb` runs one noise level with a six-panel view
+rendered by [ngsplot](https://github.com/CAarset/ngsplot) — the same FEM
+renderer NGSolve's own viewer uses — repainted live while the solve runs
+and stitched into an animated HTML movie at the end:
 
 ```
 datum z  |  data error u - z  |  ground truth u at final time
@@ -63,14 +76,14 @@ estimate qhat  |  error qhat - q  |  true parameter q
 Each colorbar spans the global extremes of its category (both state
 panels share one range, the parameter panels share theirs, both error
 panels are symmetric about zero), and the panels carry no interactive
-chrome, so colours are comparable across every frame.  Pass `live=True`
-to stream the same six panels interactively in `ngsolve.webgui` canvases
-instead (those stream from a CDN, so the browser needs internet).  The
-notebook only picks an example (`burgers`, `darcy`, `fisher`,
-`potential`, `allen_cahn`, `arrhenius`, `arrhenius_linear`) and a noise
-level; `mras/live.py` holds all
-the plumbing (demo sizing, frame recording, static ranges, the ffmpeg
-stitch).  Run it with `jupyter lab notebooks/mras_live.ipynb`.
+chrome, so colours are comparable across every frame.  The notebook only
+picks an example (`burgers_pipe`, `darcy`, `fisher`, `potential`,
+`allen_cahn`, `arrhenius`, ...) and a noise level; `mras/live.py` holds
+all the plumbing (panel layout, frame recording, static ranges, the movie
+stitch).  Run it with `jupyter lab notebooks/mras_live.ipynb`; outside a
+notebook, `mras.live.run_live(name, noise_level)` returns the
+`LevelResult` and writes the same movie to
+`results/<name>_noise<p>.html`.
 
 ## Your own reconstruction problem, step by step
 
@@ -78,12 +91,13 @@ stitch).  Run it with `jupyter lab notebooks/mras_live.ipynb`.
 self-contained problem — recovery of a reaction coefficient `q(x)` in
 `Dt u - Δu + q u = g` — with four clearly marked TODO blocks (mesh,
 source, `q_true`, joint weak form) and the theory hooks already wired:
-run it, and it identifies `q` at noise level 0% (noise-free) and noise
-level 5%, prints the full checklist, and writes its figures.  Rename the
+run `.venv/bin/python -m mras.live blank_reaction --quick`, and it
+identifies `q` at noise level 0% (noise-free) and noise level 5%, prints
+the full checklist, and writes its figures.  Rename the
 class, edit the blocks, keep the structure; the constructor refuses any
 problem that is *not* runnable and names every missing piece (see below).
 `examples/burgers_pipe.py` (pipe geometry, heater-grid source) and
-`mras/problems/arrhenius.py` (the fully verifiable reference) show the
+`examples/arrhenius.py` (the fully verifiable reference) show the
 same contract under more geometry and more nonlinearity.
 
 A problem is a `mras.Problem` subclass on `(U_h, Q_h) = P3 x P0` over any
@@ -122,8 +136,13 @@ Then run:
 p = MyProblem(h=0.2, dt=0.05, tend=1.5, seed=0)
 res = p.run_level(0.0)               # LevelResult: error_q, error_u, series
 p.run(noise_levels=[0.0, 0.05])      # campaign; then error_figure(results, p.dt)
-.venv/bin/python examples/blank_problem.py       # the template, end to end
 ```
+
+Once the file carries a `PROBLEM = MyProblem` marker (and a `DEFAULTS`
+dict), the runner does everything else —
+`.venv/bin/python -m mras.live my_problem --h 0.2 --dt 0.05`; the example
+file itself never grows argparse code, and stays untouched once the
+problem is well-formed.
 
 **4. Two things are verdicts, not choices.**  `sigma` is forced by the
 structure of `f`: 0 iff `f` is affine in `q` — the checklist derives the
@@ -184,7 +203,10 @@ silent flip of any rung fails the suite.
 
 Runs are described by `mras.config.RunConfig` (pydantic-validated) and load
 from YAML: one mapping, a sequence, a `{defaults, runs}` merge, or multiple
-documents.  `configs/burgers.yaml` is the reference:
+documents.  The YAML is the control switch, never a restatement: fields it
+does not mention fall through to the example's `DEFAULTS` (on top of the
+constructor signature); `--quick` swaps in the audited `QUICK` sizes; CLI
+flags sit on top of everything.  `configs/burgers.yaml` is the reference:
 
 ```yaml
 defaults: {dt: 0.01, tend: 5.0, k_u: 3, noise_levels: [0.0, 0.05, 0.2],
@@ -195,7 +217,7 @@ runs:
 ```
 
 ```bash
-.venv/bin/python examples/burgers_pipe.py --config configs/burgers.yaml
+.venv/bin/python -m mras.live burgers_pipe --config configs/burgers.yaml
 ```
 
 ## Running the studies (Tables 6–8, Figs 4–12)
@@ -222,12 +244,16 @@ running.
 ```
 mras/               package: scheme (MRAS loop + data resolution), config
                     (YAML/pydantic), domains, fields, noise, stepper, live
-                    (webgui panels), verify (theory checklist),
-                    problems/{darcy,fisher,potential,allen_cahn,arrhenius},
-                    data/pdebench, results, plotting
+                    (example catalog, run runner, live ngsplot panels),
+                    verify (theory checklist), data/pdebench, results,
+                    plotting
 notebooks/        live six-panel notebook (Burgers preset)
-examples/           runnable demos (blank template to copy, Burgers pipe,
-                    Helmholtz, decaying Darcy, quickstart)
+examples/         every problem in one folder: one file per example
+                  (darcy, fisher, burgers_pipe, the arrhenius pair,
+                  potential, allen_cahn, helmholtz_in_parameter), each
+                  declaring PROBLEM/PROBLEMS plus its DEFAULTS/QUICK/CHECK
+                  sizes, plus blank_problem.py (template to copy) and
+                  darcy_decaying.py (stepper demo)
 configs/            YAML run configurations
 scripts/            reproduction campaigns, figure assembly, the theory
                     checklist, the Arrhenius reconstruction demo

@@ -33,12 +33,12 @@ extensible design, so its numbers are its own.
   estimator starts in the exact initial state: error histories begin at
   t = 0 with `error_u[0] = 0`, which isolates estimator convergence from
   initial-condition transients (a test enforces this for all four).
-- Darcy (`mras/problems/darcy.py`): initial state
+- Darcy (`examples/darcy.py`): initial state
   `sin(pi x) sin(pi y)`; the source is a fresh i.i.d. standard-normal
   128x128 pixel field per time step (the paper's source model), rendered
   onto the data mesh as piecewise-constant voxel coefficients. Truth runs
   on the fine data mesh with the same per-step sources.
-- Fisher-KPP (`mras/problems/fisher.py`): deterministic Gaussian bump
+- Fisher-KPP (`examples/fisher.py`): deterministic Gaussian bump
   `u0 = 3 exp(-r^2 / 0.4)`; forcing `g(x, t) = u0(x) cos(2 t)`; ring-shaped
   true parameter 1 inside r = 0.5 and 0.25 outside r = 0.9.
 - Potential and Allen-Cahn: references
@@ -166,7 +166,7 @@ Open — where the code cannot force conformance:
   like in practice; the Arrhenius pair is the same code on the same
   checklist with the hooks filled in, and recovers.
 
-## Arrhenius reaction pair — `mras/problems/arrhenius.py` (sixth/seventh examples)
+## Arrhenius reaction pair — `examples/arrhenius.py` (sixth/seventh examples)
 
 `Dt u - Laplace(u) + q(x) r(u) = g` with `r(u) = 1 + u` (linear member,
 the "linearised" twin) and `r(u) = exp(u)` (nonlinear member) on one and
