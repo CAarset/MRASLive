@@ -46,6 +46,22 @@ def test_panels_throttle_and_track_the_final_state():
     assert not panels._final_tracked
 
 
+def test_repainting_keeps_the_panels_their_own_size():
+    # A colourbar carves its room out of the panel's grid cell and leaves a
+    # narrower subplotspec behind; matplotlib hands the cell back only when
+    # the bar's mappable lives in the axes, and ngsplot's bar runs on a
+    # private ScalarMappable.  Without handing the cell back each frame,
+    # every repaint would start from the previous frame's leftovers.
+    problem = build("burgers_pipe", **MICRO)
+    panels = LivePanels(problem, every=1, live=False)
+    widths = []
+    for _ in range(3):
+        panels.render()
+        widths.append([ax.get_position(original=True).width
+                       for _, ax, _ in panels._animated])
+    assert np.allclose(widths, widths[0])
+
+
 def test_run_live_restores_the_hook_and_returns_results(tmp_path):
     problem = build("burgers_pipe", **MICRO)
     result = run_live(problem, 0.0, every=2, live=True,

@@ -308,6 +308,15 @@ class LivePanels:
         self.figure.subplots_adjust(left=0.02, right=0.98, top=0.91,
                                     bottom=0.03, hspace=0.45, wspace=0.55)
         axes = self.figure.subplots(2, 3)
+        # A colourbar carves its room out of the panel's grid cell by
+        # replacing the panel's subplotspec with the narrower remainder,
+        # and hands it back on removal only when the bar's mappable lives
+        # in the axes -- ngsplot's bar runs on a private ScalarMappable.
+        # The cells are snapshotted here so every repaint starts from the
+        # full cell it was given, exactly like a first paint into a fresh
+        # axes would.
+        self._grid = {ax: (ax.get_subplotspec(), ax.get_anchor())
+                      for ax in axes.ravel()}
         self._animated, self._static = [], []
         for ax, (gf, title, kw, animated) in zip(axes.ravel(), spec):
             ax.set_title(title, fontsize=9)
@@ -323,6 +332,9 @@ class LivePanels:
     def render(self):
         """Repaint the animated panels from the current grid functions."""
         for gf, ax, kw in self._animated:
+            spec, anchor = self._grid[ax]
+            ax.set_subplotspec(spec)
+            ax.set_anchor(anchor)
             Plot(gf, ax=ax, colorbar=True, width=self._w, height=self._h,
                  **kw)
 
