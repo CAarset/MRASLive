@@ -103,55 +103,82 @@ Rigorous (the paper's assumptions are verified or exact):
   `(0,6) x (0,1.2)`, so Poincare gives `lambda_1 >= pi^2 (1/36 + 1/1.44)`
   `~ 7.13`, and with `L = 0` any `M <= lambda_1` satisfies (A3) (`M = 1`
   as for Darcy).  The explicit q-flow gain is
-  `dt ||grad z||_inf^2 / (2 lambda_1)`; measured `||grad z||_inf ~ 12`
-  makes it `0.21` per unit `dt`, so `dt = 0.02` runs with margin.
+  `dt ||grad z||_inf^2 / (2 lambda_1)`; the measured runs stayed stable
+  with margin up to `dt = 0.2` (the step sweep below), where accuracy,
+  not stability, is the limit.
 
 Ad-hoc modelling (no theory attached, none claimed):
 
 - The truth generator is backward Euler with lagged advection on the
   data mesh; it produces observations only and enters no assumption.
-- Wake parameter `q_true`: logistic decay off the three hole centres
-  (`Q_WAKE = 0.15` -> `Q_FREE = 1.0`, scale `Q_SMOOTH = 0.0875`); the
-  smooth transition is a modelling choice (abrupt disks leave most of
-  the L2 error in the kink layer: measured wake-region error drops from
-  2.09 to 0.76 when the wake is smoothed, at unchanged global error).
-- Zero initial estimate `qhat = 0`; Gaussian-bump initial state.
+- Wake parameter `q_true`: two smooth low-diffusion wake bands straddling
+  the hole row (`y = 0.4`/`0.8`, `Q` from 0.12 to 0.55, mildly modulated
+  along `x`); the smooth bands are a modelling choice (abrupt disks leave
+  most of the L2 error in the kink layer: measured wake-region error
+  drops from 2.09 to 0.76 when the wake is smoothed, at unchanged global
+  error).
+- Zero initial estimate `qhat = 0`; state starts at rest (the sustained
+  heater grid drives it).
+- Source: six Gaussian heaters on a 3x2 grid, heater `(i, j)` running at
+  `3 + i + j/PHI` cycles per `T_FORCING = 8` — pairwise incommensurate
+  frequencies, so the source is deterministic yet aperiodic (no common
+  period), and the state it sustains never repeats.  This replaces an
+  earlier integer-harmonic source of exact period `T_FORCING`, same
+  heaters and phases; the swap isolates commensurability as the single
+  changed design choice (PE evidence below).
 
 Open — where the code cannot force conformance:
 
 - (A2) coercivity of the coupled linearisation is unverified, exactly as
   the paper leaves it for its own Darcy benchmark (Remark 4.2); the
   justification there is persistent excitation (PE) of the source.
-- PE evidence (noise level 0% (noise-free), `h = 0.35`, `dt = 0.02`, relative `error_q`):
+- PE evidence, earlier campaign (Gaussian-bump start-up, logistic wake,
+  horizons 5–15, `dt = 0.005`–`0.02`): every single-knob variant — single
+  frequency, richer frequencies, finer `dt`, drifting heater centres —
+  left `error_q` in the 0.77–0.83 band while `||u - z||` stayed near
+  0.02.  The diagnosis held (the state tracks without identifying `q`)
+  and fed the redesign above.
+- PE evidence, shipped design (rest start, incommensurate heaters;
+  noise-free, `h = 0.35`, `k_u = 3`, `seed = 0`; `error_q` at cutoff,
+  tail slope over the last 20% of steps):
 
-  | source / horizon / wake | `error_q` | min over run |
+  | horizon (`dt = 0.05`) | `error_q` | tail slope / step |
   |---|---|---|
-  | single frequency, abrupt wake, `T = 5` | 0.805 | 0.805 |
-  | same, `T = 15` | 0.788 | 0.788 |
-  | single frequency, smooth wake, `T = 5` | 0.785 | 0.785 |
-  | same, `T = 15` | 0.765 | 0.765 |
-  | single frequency, smooth wake, `dt = 0.005`, `T = 5` | 0.830 | 0.830 |
-  | distinct frequencies (in phase), smooth wake, `T = 5` | 0.776 | 0.776 |
-  | same, `T = 10` | 0.767 | 0.767 |
-  | drifting heater centres (spatial PE surrogate), `T = 10` | 0.773 | 0.773 |
+  | `T = 10` | 0.572 | -3.9e-4 |
+  | `T = 25` | 0.479 | -1.7e-4 |
+  | `T = 50` | 0.394 | -1.6e-4 |
+  | `T = 100` | 0.308 | -7.0e-5 |
+  | `T = 200` | 0.221 | -3.5e-5 |
+  | `T = 400` | 0.138 | -1.5e-5 |
+  | `T = 800` | 0.096 | -2.2e-6 |
 
-  while `||u - z||` stays near 0.02: the state tracks without
-  identifying `q`.  The plateau is insensitive to step size (finer is
-  worse: the update is rate-limited, not discretisation-limited),
-  horizon (longer helps only marginally), source frequency richness and
-  even spatial sweeping of the heaters — the signature of an
-  identifiability (PE/(A2)) gap in the `q -> z` map for this source
-  geometry, not of a discretisation or implementation defect.  For
-  comparison, the paper's own Darcy benchmark — with per-step i.i.d.
-  random pixel sources, i.e. maximal PE — recovers `q` only to relative
-  errors 0.33–0.60 (Table 6).
-- The shipped demo takes the best-behaving variants (smooth wake, distinct
-  frequencies on top of the original phase stagger, `T = 10`; measured
-  noise-free relative error 0.777 — the phase-staggered variant behaves like
-  the in-phase row above, within the plateau band).  The deeper question —
-  whether to accept the heater grid as PE surrogate, switch to per-step
-  randomised spatial sources (the Darcy benchmark's own recipe), or change
-  the model so that (A2) becomes verifiable — is open and recorded here.
+  every run is monotone and still descending at its cutoff; only at
+  `T = 800` does the descent level off, near 0.09, with a small wiggle
+  at the very end — the discretisation-limited floor of this
+  configuration.  Short runs overstate the eventual error and the
+  horizon is the dominant lever; no plateau appears at any shorter
+  horizon.  Against the previous integer-harmonic source (same heaters,
+  same phases, exact common period) the aperiodic source is 4.8% better
+  at `T = 50` (0.394 vs 0.414) and 7.8% at `T = 100` (0.308 vs 0.331) —
+  a real but secondary effect, widening with horizon.
+- Step size saturates for the parameter (aperiodic, `T = 50`,
+  noise-free): `dt = 0.2/0.1/0.05/0.02/0.01` gives `error_q`
+  0.459/0.402/0.394/0.392/0.392 while the state error keeps improving
+  (0.072 -> 0.004): small steps pay for the state up to a point and buy
+  the parameter nothing below `dt` about 0.05 — half the forcing period
+  of the fastest heater.
+- Noise floors the parameter, not the state (`T = 400`): `error_q`
+  0.138 noise-free, 0.260 at noise level 1% (tail still creeping down),
+  0.532 at noise level 5% with a flat to rising tail — the floor grows
+  roughly linearly with the noise (about a 10x amplification, the
+  signature of weak identifiability of `q` through the gradient
+  coupling), while the state tracks at ~0.02 in every case.  Without
+  (A2) there is no robustness claim for `qhat`, and this is the
+  concrete shape of that gap.
+- The deeper question — whether to accept the heater grid as PE
+  surrogate, switch to per-step randomised spatial sources (the Darcy
+  benchmark's own recipe), or change the model so that (A2) becomes
+  verifiable — is open and recorded here.
 - Framework verdict (`mras/verify.py`, reproducible with
   `scripts/checklist.py`): adjoint pairing machine-precise, (A1) exact
   (`sigma = 0`, `L = 0`), (A2) FAIL — the kernel probe measures a
@@ -161,8 +188,9 @@ Open — where the code cannot force conformance:
   seeded.  The failure is therefore localised to the one assumption the
   paper itself does not verify for its gradient-coupled benchmarks: the
   implementation passes every probe that does not presuppose (A2), and
-  the error plateau sits in the same band as the paper's own Darcy
-  numbers.  This is what "no (A2), no convergence-rate guarantee" looks
+  noise-free reconstruction descends below the band of the paper's own
+  Darcy benchmark (0.33-0.60, Table 6) given enough horizon.  This is
+  what "no (A2), no convergence-rate guarantee" looks
   like in practice; the Arrhenius pair is the same code on the same
   checklist with the hooks filled in, and recovers.
 

@@ -11,106 +11,76 @@ Model (scalar Burgers with unknown diffusion field q, advection in x):
     u_t - div(q grad u) + u u_x = g        in the pipe,
     u = 0                                 on walls, holes, inlet, outlet.
 
-The pipe is a rectangle with circular holes (CSG2d); the true parameter is
-low diffusion around the holes, high elsewhere, so recovery is visible as
-three wakes.  The estimator is the paper's scheme (4) with the model split
+The pipe is a rectangle pierced by circular holes (CSG2d).  The true
+parameter is a pair of low-diffusion wake bands straddling the hole row
+(y = 0.4 and y = 0.8), higher diffusion elsewhere, lightly modulated
+along x.  The state starts at rest and the heater grid keeps it moving.
+
+The estimator is the paper's scheme (4) with the model split
 f(q, u) = -div(q grad u) + u u_x: linear in q, so sigma = 0 and the
 parameter equation is the Darcy adjoint rule (Prop. 4.1) verbatim,
 q_t = grad z . grad (u - z) — the advection carries no q and drops out of
 the q-derivative.  Per Remark 2.1 the remaining nonlinearity is evaluated
 on the datum, z z_x, so it cancels from the continuous error system; the
 state row below is Darcy's weak form (18)-(19) plus the datum-side term
--(z z_x, v).  (A1) holds exactly (L = 0) and (A3) with C = -Laplace, M = 1
-as for Darcy; (A2) is left unverified exactly as the paper leaves it for
-Darcy (Remark 4.2), and the heater grid is its discrete persistent-
-excitation surrogate.  See docs/DEVIATIONS.md for the full audit.
+-(z z_x, v).  (A1) holds exactly (L = 0) and (A3) with C = -Laplace,
+M = 1 as for Darcy; (A2) is left unverified exactly as the paper leaves
+it for Darcy (Remark 4.2).  The persistent-excitation surrogate here is
+the forcing itself: heater frequencies are pairwise incommensurate, so
+the source — and the state it sustains — never repeats (see
+docs/DEVIATIONS.md for the full audit).
 
     .venv/bin/python -m mras.live burgers_pipe --quick
     .venv/bin/python -m mras.live burgers_pipe --config configs/burgers.yaml
 """
 
-from ngsolve import BilinearForm, LinearForm, dx, exp, grad, pi, sin, sqrt, x, y, IfPos
+from ngsolve import BilinearForm, LinearForm, dx, exp, grad, pi, sin, x, y
 
 from mras.domains import burgers_pipe
 from mras.scheme import Problem
 
 LENGTH, HEIGHT = 6.0, 1.2
-HOLE_XS, HOLE_RADIUS = (1.5, 3.0, 4.5), 0.18
-Q_WAKE, Q_FREE, Q_RADIUS = 1.0, 1.0e-1, 0.33
-Q_SMOOTH = 0.0875  # wake decay scale, a quarter of the demo cell size
 
-# Common forcing period. Every heater frequency is an integer multiple of 1/T,
-# so SOURCE(t + T) == SOURCE(t) exactly.
-T_FORCING = 8.0
-
-# Source amplitude. This is deliberately much smaller than 0.9: the state is
-# dissipative, so the source amplitude is not the state amplitude.
-SOURCE_AMPLITUDE = 5
+# The golden ratio is the usual way to get pairwise irrational multiples:
+# heater (i, j) runs at (3 + i + j/PHI) cycles per T_FORCING, and the
+# ratio of any two of these six frequencies is irrational, so no common
+# period exists.  The source is deterministic — every frequency and
+# phase is fixed — but aperiodic; it is the discrete persistent-
+# excitation surrogate for (A2).
+PHI = (1 + 5**0.5) / 2
+T_FORCING = 8.0          # reference period; heater periods are 1.4 - 2.7
+SOURCE_AMPLITUDE = 5.0   # per-heater Gaussian peak; the resulting state
+# amplitude is far smaller — the pipe is dissipative and absorbing on
+# walls, holes, and both ends.
 
 
 def SOURCE(t):
-    """Six heaters on a 3x2 grid with an exact common period T_FORCING.
-
-    Frequencies are integer multiples of 1/T_FORCING, so the source is
-    exactly periodic. The phases differ by cell, preserving spatial variety.
-    """
-    # Harmonic numbers: 5, 4, 4, 4, 3, 3 cycles per forcing period.
-    harmonics = (
-        (0, 0, 5),
-        (0, 1, 4),
-        (1, 0, 4),
-        (1, 1, 4),
-        (2, 0, 3),
-        (2, 1, 3),
-    )
-
+    """Six Gaussian heaters on a 3x2 cell grid, incommensurate and staggered."""
     return sum(
         SOURCE_AMPLITUDE
-        * sin(2 * pi * (k * t / T_FORCING + phase))
-        * exp(
-            -(
-                (x - (i + 0.5) * LENGTH / 3) ** 2
-                + (y - (j + 0.5) * HEIGHT / 2) ** 2
-            )
-            / 0.15
-        )
-        for i, j, k, phase in (
-            (i, j, k, (0.4 * i + 0.7 * j + 0.25) % 1.0)
-            for i, j, k in harmonics
-        )
+        * sin(2 * pi * ((3 + i + j / PHI) * t / T_FORCING
+                        + (0.4 * i + 0.7 * j + 0.25) % 1.0))
+        * exp(-((x - (i + 0.5) * LENGTH / 3) ** 2
+                + (y - (j + 0.5) * HEIGHT / 2) ** 2) / 0.15)
+        for i in range(3)
+        for j in range(2)
     )
 
 
 def _wake_field():
-    """Structured diffusion field: smooth, positive, and visually distinct.
+    """True diffusion: two smooth low-diffusion wake bands.
 
-    Low diffusion in two horizontal wake bands; higher diffusion elsewhere.
-    The field is bounded in [Q_MIN, Q_MAX] and has no sharp disk boundaries.
+    The field is bounded in [Q_MIN, Q_MAX] and has no sharp boundaries;
+    abrupt disks leave most of the L2 error in the kink layer rather
+    than in the wake.
     """
-    Q_MIN = 0.12
-    Q_MAX = 0.55
+    Q_MIN, Q_MAX = 0.12, 0.55
 
-    # Two smooth low-diffusion bands around y = 0.4 and y = 0.8.
     wake = exp(-((y - 0.4) ** 2) / 0.03) + exp(-((y - 0.8) ** 2) / 0.03)
-
-    # A mild longitudinal modulation avoids an artificially uniform wake.
-    wake *= 0.75 + 0.25 * sin(2 * pi * x / LENGTH)
+    wake *= 0.75 + 0.25 * sin(2 * pi * x / LENGTH)  # mild streamwise modulation
 
     return Q_MIN + (Q_MAX - Q_MIN) * (1.0 - wake / (1.0 + wake))
 
-
-def _periodic_state():
-    """Small, smooth initial state compatible with zero Dirichlet boundaries.
-
-    It is not an exact periodic solution, but it is small and has no large
-    transient, so the state settles quickly into the source-driven cycle.
-    """
-    return (
-        SOURCE_AMPLITUDE
-        * sin(2 * pi * x / LENGTH)
-        * sin(pi * y / HEIGHT)
-        * sin(2 * pi * 0.0 / T_FORCING)
-    )
 
 class BurgersPipe(Problem):
     """Identify q in Burgers flow from generated noisy state observations."""
@@ -133,13 +103,11 @@ class BurgersPipe(Problem):
     def coupling_adjoint(self, q, z, s):
         return grad(z) * grad(s)
 
-    def __init__(self, h=0.15, dt=1e-2, tend=10.0, k_u=3, seed=0,
-                 series_counters=()):
+    def __init__(self, h=0.15, dt=1e-2, tend=10.0, k_u=3, seed=0):
         super().__init__(burgers_pipe(maxh=h, order_u=k_u), dt=dt, tend=tend,
                          k_u=k_u, seed=seed)
-        self.series_counters = tuple(series_counters)
         self.data_domains = burgers_pipe(maxh=h / 2, order_u=k_u)
-        self.u0 = _periodic_state()
+        self.u0 = 0.0  # at rest; the aperiodic heaters drive the state
         self.q_true = _wake_field()
 
     def source(self, t):
