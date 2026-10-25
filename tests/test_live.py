@@ -28,12 +28,12 @@ def test_panels_throttle_and_track_the_final_state():
     panels.render = lambda: (redraws.append(1), real_render())
     problem.on_step = panels.update
     result = problem.run_level(0.0, progress=False)
-    # n=1 (initial) is skipped by the throttle; n=2 and n=4 update.
-    assert len(redraws) == 2
-    assert len(panels.frames) == 2
-    panels.update(result.state, force=True)
+    # n=1 (t = 0) is never skipped by the throttle; then n=2 and n=4.
     assert len(redraws) == 3
     assert len(panels.frames) == 3
+    panels.update(result.state, force=True)
+    assert len(redraws) == 4
+    assert len(panels.frames) == 4
 
     state = result.state
     assert np.allclose(panels.z.vec.FV().NumPy(), state.z.vec.FV().NumPy())
@@ -47,11 +47,10 @@ def test_panels_throttle_and_track_the_final_state():
 
 
 def test_repainting_keeps_the_panels_their_own_size():
-    # A colourbar carves its room out of the panel's grid cell and leaves a
-    # narrower subplotspec behind; matplotlib hands the cell back only when
-    # the bar's mappable lives in the axes, and ngsplot's bar runs on a
-    # private ScalarMappable.  Without handing the cell back each frame,
-    # every repaint would start from the previous frame's leftovers.
+    # A colourbar carves its room out of the panel's grid cell; ngsplot hands
+    # the cell back on rebuilds and reuses the standing bar across repaints,
+    # so repainting must leave the panel exactly as wide as the first bar
+    # left it.
     problem = build("burgers_pipe", **MICRO)
     panels = LivePanels(problem, every=1, live=False)
     widths = []
@@ -60,6 +59,52 @@ def test_repainting_keeps_the_panels_their_own_size():
         widths.append([ax.get_position(original=True).width
                        for _, ax, _ in panels._animated])
     assert np.allclose(widths, widths[0])
+
+
+def test_updates_thin_to_a_fixed_count_at_any_length():
+    # The default stride is read off the run length: a long horizon stays
+    # a movie of about max_frames frames, evenly spaced, instead of a
+    # slow slideshow of every thousandth step.
+    problem = build("burgers_pipe", h=0.6, dt=0.1, tend=2.0)
+    panels = LivePanels(problem, live=False, max_frames=4)
+    assert 4 <= panels.every <= 6  # proportional to the step count
+    counters = []
+    real_update = panels.update
+
+    def spy(state, force=False):
+        counters.append(state.counter)
+        return real_update(state, force)
+
+    problem.on_step = spy
+    problem.run_level(0.0, progress=False)
+    rendered = [c for c in counters if c == 1 or c % panels.every == 0]
+    assert rendered[0] == 1  # the t = 0 frame is always there
+    assert len(panels.frames) == len(rendered) == 1 + problem.tsteps // panels.every
+    assert len(panels.frames) <= 5  # max_frames plus the t = 0 frame
+
+
+def test_the_view_opens_before_the_truth_is_generated():
+    # The panels must exist and paint without the forward-truth run: the
+    # view opens at t = 0, and only begin() pays for the data generation.
+    problem = build("burgers_pipe", **MICRO)
+    panels = LivePanels(problem, every=1, live=False)
+    z_kw = panels._animated[0][2]
+    assert z_kw.get("vmin") is None  # no truth consulted at construction
+    panels.render()
+    panels.begin()
+    assert panels._animated[0][2].get("vmin") is not None
+    assert panels._final_tracked in (True, False)
+
+
+def test_run_live_takes_explicit_step_and_horizon(tmp_path):
+    # dt and tend are named parameters of the live call, not hidden kwargs:
+    # the notebook shows them in the signature, and DEFAULTS do not silently
+    # override them.
+    import inspect
+    assert {"dt", "tend"} <= set(inspect.signature(run_live).parameters)
+    result = run_live("burgers_pipe", 0.0, dt=0.1, tend=0.5,
+                      path=tmp_path / "dt.html")
+    assert result.meta["steps"] == 3  # DEFAULTS would give hundreds of steps
 
 
 def test_run_live_restores_the_hook_and_returns_results(tmp_path):

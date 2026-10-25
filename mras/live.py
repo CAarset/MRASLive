@@ -216,17 +216,24 @@ class LivePanels:
     reconstruction error when the true parameter is known) are repainted by
     :meth:`render`; the truth panels are painted once, except the final
     state when the problem does not expose it up front and it is tracked
-    from the data layer instead.  Color ranges are fixed from the truth
-    fields, so colors stay comparable across frames.
+    from the data layer instead.  Colour ranges are fixed from the truth
+    fields in :meth:`begin`, so colors stay comparable across frames; the
+    constructor defers all truth work so the view can open at t = 0.
 
     Every redrawn frame is recorded; :func:`make_movie` stitches them into
     the animated HTML.  ``live=True`` also streams the figure as a notebook
     widget (:meth:`show`).
     """
 
-    def __init__(self, prob, every=5, live=False, panel_size=(480, 360)):
-        if every < 1:
-            raise ValueError("every must be a positive step count")
+    def __init__(self, prob, every=None, live=False, panel_size=(480, 360),
+                 max_frames=120):
+        if every is not None and every < 1:
+            raise ValueError("every counts steps; the smallest stride is one")
+        if every is None:
+            # Thin to about max_frames frames spread evenly over the run: a
+            # long tend then still updates at roughly its usual frequency
+            # instead of turning the view into a slow slideshow.
+            every = max(1, -(-(prob.tsteps + 1) // max_frames))
         self.prob = prob
         self.every = int(every)
         self.live = bool(live)
@@ -248,8 +255,11 @@ class LivePanels:
         # Final-time ground truth: precomputable when the data layer exposes
         # it (forward snapshots or a truth hook); otherwise the problem's own
         # data() supplies u_true step by step and the panel tracks it, so the
-        # last frame is the final-time truth.
-        self._final_tracked = not self._resolve_final_u()
+        # last frame is the final-time truth.  Resolving it can mean a full
+        # forward run of the data mesh, so it waits for begin(): the view
+        # must be open at t = 0 before that starts.
+        self._truth_started = False
+        self._final_tracked = False
 
         self.frames = []
         self._build_figure()
@@ -271,18 +281,48 @@ class LivePanels:
                 return True
         return False
 
+    def begin(self, quiet=False):
+        """Resolve the final-time truth, fix the state ranges, and repaint.
+
+        The forward run that generates the observation data lives here, not
+        in the constructor, so :meth:`show` can open the view at t = 0
+        before it starts.  The first :meth:`update` begins quietly for
+        direct users who never call this.
+        """
+        if self._truth_started:
+            return
+        self._truth_started = True
+        self._final_tracked = not self._resolve_final_u()
+        if self._final_tracked:
+            entry = next(e for e in self._static if e[0] is self.u_final)
+            self._static.remove(entry)
+            self._animated.append(entry)
+        else:
+            lo, hi = _minmax(self.u_final)
+            self._state_kw.update({"autoscale": False, "vmin": lo,
+                                   "vmax": hi})
+            sym = 0.25 * (hi - lo) + 1e-12
+            self._err_kw.update({"autoscale": False, "vmin": -sym,
+                                 "vmax": sym})
+        for gf, ax, kw in self._static:
+            Plot(gf, ax=ax, colorbar=True, width=self._w, height=self._h,
+                 **kw)
+        if quiet:
+            return
+        self.render()
+        if self.live and self._image is not None:
+            self._image.value = self._png()
+
     def _range_kwargs(self, lo, hi):
         return {"autoscale": False, "vmin": lo, "vmax": hi} if lo is not None \
             else {"autoscale": True}
 
     def _build_figure(self):
-        if self._final_tracked:
-            state_kw = err_kw = {"autoscale": True}
-        else:
-            lo, hi = _minmax(self.u_final)
-            state_kw = self._range_kwargs(lo, hi)
-            sym = 0.25 * (hi - lo) + 1e-12
-            err_kw = self._range_kwargs(-sym, sym)
+        # Ranges taken from the truth wait for begin(); the state and error
+        # panels start autoscaled.  Parameter ranges come from the problem's
+        # coefficient and are known at construction.
+        self._state_kw = {"autoscale": True}
+        self._err_kw = {"autoscale": True}
         if self.q_true is None:
             q_kw = q_err_kw = {"autoscale": True}
         else:
@@ -292,10 +332,10 @@ class LivePanels:
             q_err_kw = self._range_kwargs(-sym, sym)
 
         # (gf, title, range kwargs, animated?) in panel order
-        spec = [(self.z, "datum z", state_kw, True),
-                (self.err_u, "data error u - z", err_kw, True),
-                (self.u_final, "ground truth u at final time", state_kw,
-                 self._final_tracked),
+        spec = [(self.z, "datum z", self._state_kw, True),
+                (self.err_u, "data error u - z", self._err_kw, True),
+                (self.u_final, "ground truth u at final time",
+                 self._state_kw, self._final_tracked),
                 (self.qhat, "estimate qhat", q_kw, True)]
         if self.q_true is not None:
             spec += [
@@ -305,18 +345,12 @@ class LivePanels:
         self.figure = Figure(figsize=(4.8 * 3 + 1.2, 3.6 * 2 + 1.4),
                              dpi=100)
         FigureCanvasAgg(self.figure)
-        self.figure.subplots_adjust(left=0.02, right=0.98, top=0.91,
+        # The right margin carries the right-hand column's colourbar: bar
+        # plus tick labels measures about 0.06 of the figure width past the
+        # picture, and the figure does not grow to fit it.
+        self.figure.subplots_adjust(left=0.02, right=0.93, top=0.91,
                                     bottom=0.03, hspace=0.45, wspace=0.55)
         axes = self.figure.subplots(2, 3)
-        # A colourbar carves its room out of the panel's grid cell by
-        # replacing the panel's subplotspec with the narrower remainder,
-        # and hands it back on removal only when the bar's mappable lives
-        # in the axes -- ngsplot's bar runs on a private ScalarMappable.
-        # The cells are snapshotted here so every repaint starts from the
-        # full cell it was given, exactly like a first paint into a fresh
-        # axes would.
-        self._grid = {ax: (ax.get_subplotspec(), ax.get_anchor())
-                      for ax in axes.ravel()}
         self._animated, self._static = [], []
         for ax, (gf, title, kw, animated) in zip(axes.ravel(), spec):
             ax.set_title(title, fontsize=9)
@@ -332,9 +366,6 @@ class LivePanels:
     def render(self):
         """Repaint the animated panels from the current grid functions."""
         for gf, ax, kw in self._animated:
-            spec, anchor = self._grid[ax]
-            ax.set_subplotspec(spec)
-            ax.set_anchor(anchor)
             Plot(gf, ax=ax, colorbar=True, width=self._w, height=self._h,
                  **kw)
 
@@ -356,9 +387,10 @@ class LivePanels:
 
     def update(self, state, force=False):
         """Refresh all panels from the current scheme state (throttled)."""
+        self.begin(quiet=True)  # the t = 0 frame carries the truth ranges
         self._n += 1
-        if not force and self._n % self.every:
-            return
+        if not force and self._n > 1 and self._n % self.every:
+            return  # the first frame, the t = 0 one, is never skipped
         self.z.vec.data = state.z.vec.Copy()
         self.err_u.vec.data = state.gfu.vec.Copy()
         self.err_u.vec.data -= state.z.vec.Copy()
@@ -422,22 +454,31 @@ def _display_movie(path):
     display(HTML(Path(path).read_text()))
 
 
-def run_live(example, noise_level=0.0, every=5, live=False, fps=24.0,
-             path=None, max_frames=120, **kwargs):
+def run_live(example, noise_level=0.0, every=None, live=False, dt=None,
+             tend=None, fps=24.0, path=None, max_frames=120, **kwargs):
     """Assimilate one noise level with the six-panel ngsplot view.
 
     ``example`` is a name from :func:`list_examples` (or an already-built
     ``Problem``); ``noise_level`` is the relative L2 noise of the data
-    (``0.05`` = a noise level of 5 %).  The frames are always recorded and
-    stitched into an animated HTML movie (``results/<name>_noise<p>.html``
-    unless ``path`` says otherwise), displayed inline; ``live=True`` adds
-    the streaming figure while the solve runs.  Returns the
-    :class:`~mras.results.LevelResult`.
+    (``0.05`` = a noise level of 5 %); ``dt`` and ``tend`` are the step
+    size and the horizon of the assimilation.  The view opens at t = 0
+    before the data-generating forward run starts, then refreshes every
+    ``every`` steps -- by default thinned to about ``max_frames`` evenly
+    spread frames, so any horizon takes roughly the same number of
+    updates.  The frames are always recorded and stitched into an animated
+    HTML movie (``results/<name>_noise<p>.html`` unless ``path`` says
+    otherwise), displayed inline; ``live=True`` adds the streaming figure
+    while the solve runs.  Returns the :class:`~mras.results.LevelResult`.
     """
+    if dt is not None:
+        kwargs["dt"] = dt
+    if tend is not None:
+        kwargs["tend"] = tend
     prob = example if isinstance(example, Problem) else build(example, **kwargs)
-    panels = LivePanels(prob, every=every, live=live)
+    panels = LivePanels(prob, every=every, live=live, max_frames=max_frames)
     if live:
-        panels.show()
+        panels.show()  # open the view before the truth run can outlast it
+    panels.begin()
     prob.on_step = panels.update
     try:
         result = prob.run_level(noise_level, progress=False)
