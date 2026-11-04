@@ -1,138 +1,120 @@
-"""Time-dependent Darcy flow benchmark (paper Section 4, Figures 4 and 12)."""
+"""Time-dependent Darcy flow benchmark (paper Section 4, Figures 4 and 12).
+
+Identification of the permeability q = nu in  u_t - div(nu grad u) = g:
+f(q, u) = -div(q grad u) is linear in q (sigma = 0, L = 0), and the tracking
+operator C = -Laplace makes the reference model plain diffusion.
+
+The true permeability is a PDEBench 2D Darcy sample as PDEBench defines
+it: a binary field (values 0.1 and 1.0), constant on each cell of a
+128 x 128 grid, held exactly on that grid (``mras.domains.pixel_square``).
+The estimator's mesh is unstructured and does not follow the cells
+(``fitted=True`` puts it on the grid, refined or coarsened by a power of
+two, where q lies in Q_h): q is estimated in P0 across elements its jumps
+cut through, so the best fit is off along the jumps, and only there.
+PDEBench's Darcy set is steady:
+each sample is a permeability map and the one steady solution of
+-div(nu grad u) = beta, with no time series (its "t-coordinate" is a
+placeholder), so only the map is read here.  The data are generated in
+lockstep, by the estimator's own discretisation at q, from the smooth
+state ``U0``, driven by i.i.d.
+N(0, 1) pixel fields -- the persistent excitation the paper uses for this
+gradient coupling -- drawn at the keyframes t = k SOURCE_PERIOD from a
+stream keyed by (seed, k) and interpolated linearly in time between them,
+so the forcing is a function of time, the same for every step size (the
+paper's fresh field per step is the case dt = SOURCE_PERIOD), and the
+estimator and the data model read the same source.
+"""
 
 import numpy as np
-from ngsolve import (BilinearForm, GridFunction, Grad, LinearForm, dx, pi, sin,
-                     x as xc, y as yc)
+from ngsolve import IfPos, grad, pi, sin, x as xc, y as yc
 
 from mras.data.pdebench import load_nu_grid
-from mras.domains import darcy
-from mras.fields import to_gridfunc, to_gridfunc0
+from mras.domains import darcy, pixel_square
+from mras.fields import pixel_field
 from mras.noise import seeded_rng
-from mras.scheme import Problem
-from mras.stepper import ImplicitStepper
+from mras.scheme import MRASProblem
 
-DATA_H = 0.03       # ground-truth mesh width (finer than the design mesh)
-DATA_ORDER = 4      # ground-truth polynomial order
-GRID = 128          # pixel size of the source field
 RADIUS = 0.42       # radius of the disk initial guess a_0
+# Middle tag of the source stream (seed, SOURCE_STREAM, k): the datum noise
+# streams are keyed (seed, noise level * 1e6, step), and no noise level is
+# 700 %.
+SOURCE_STREAM = 7_000_000
+SOURCE_PERIOD = 0.02  # time between independent pixel fields of the source
 
 U0 = sin(pi * xc) * sin(pi * yc)  # deterministic initial state
 
 
-class DarcyProblem(Problem):
-    """Identification of q = nu in  u_t - div(nu grad u) = g(x,t).
+def _cells(h, pixels):
+    """Cells per side of a fitted mesh: the pixel grid refined or coarsened
+    by the power of two that brings its width nearest to ``h``."""
+    return max(1, round(pixels * 2.0 ** round(np.log2(1 / (pixels * h)))))
 
-    The reference model is q~ = 0 (plain diffusion with unit coefficient); the
-    joint step therefore couples the trial q only through ``q grad(z).grad(v)``.
-    Ground truth u^dagger starts from the smooth state ``U0`` and follows
-    implicit Euler on a finer mesh, driven by a fresh i.i.d. N(0, 1) pixel
-    source at every step; the data feed reuses the source array that generated
-    the matching truth snapshot.
+
+class DarcyProblem(MRASProblem):
+    """Identification of q = nu in  u_t - div(nu grad u) = g(x, t).
 
     Parameters
     ----------
-    h, k_u : design mesh width / polynomial order of U_h.
+    h, k_u, k_q : design mesh width and the polynomial orders of U_h and
+        Q_h; with ``fitted``, the mesh is the pixel grid refined or
+        coarsened by the power of two that brings its width nearest to h.
     sample, hdf5 : which PDEBench permeability field to use.
     seed : pixel source stream and datum noise (both seeded).
-    data_h, data_order, grid : ground-truth resolution knobs.
     """
 
     name = "darcy"
-    counter_start = 1
-    stop_margin = 2.0
-
-    def __init__(self, h=0.04, dt=1e-3, tend=5.0, k_u=3, sample=0,
-                 hdf5=None, seed=0, data_h=DATA_H, data_order=DATA_ORDER,
-                 grid=GRID):
-        super().__init__(darcy(maxh=h, order_u=k_u), dt=dt, tend=tend,
-                         k_u=k_u, seed=seed)
-        self.series_counters = frozenset(
-            [1, 5, 10, 25, 50, 75, 100, 200, 500, 1500, 5000, self.tsteps - 2])
-        self.data_h = data_h
-        self.data_order = data_order
-        nu = np.asarray(load_nu_grid(hdf5, sample=sample))
-        self.grid = grid if nu.shape[0] == grid else nu.shape[0]
-        self.source_shape = (self.grid, self.grid)
-        self.nu = nu
-        self.q_true = to_gridfunc0(nu, self.Qfes)
-        self.u0 = GridFunction(self.Ufes)
-        self.u0.Set(U0)
-        self._generate()
-
-    # -- ground truth ----------------------------------------------------
-    def _generate(self):
-        """Backward-Euler ground truth plus the driving pixel stream."""
-        fine = darcy(maxh=self.data_h, order_u=self.data_order)
-        pixels = seeded_rng(self.seed).standard_normal(
-            (self.tsteps, *self.source_shape))
-        self.sources = pixels.astype(np.float32)
-        q_fine = to_gridfunc0(self.nu, fine.Qfes)
-        u, v = fine.Ufes.TnT()
-        a = BilinearForm(fine.Ufes)
-        a += q_fine * Grad(u) * Grad(v) * dx
-        a.Assemble()
-        stepper = ImplicitStepper(self.dt, a)
-        gf = GridFunction(fine.Ufes)
-        gf.Set(U0)
-        proj = GridFunction(self.Ufes)
-        self.u_exact = np.empty((self.tsteps, self.Ufes.ndof), dtype=np.float32)
-        for counter in range(self.tsteps):
-            stepper.step(gf, to_gridfunc(self.sources[counter], fine.Ufes))
-            proj.Set(gf)
-            self.u_exact[counter] = proj.vec.FV().NumPy()
-
-    # -- driver hooks ------------------------------------------------------
-    def init_run(self, state):
-        state.gfu.Set(self.u0)
-        state.u_true.Set(self.u0)
-        state.gfq.Set(self.initial_guess())
-
-    def initial_guess(self):
-        """Disk indicator a_0 for the parameter initialisation."""
-        from ngsolve import IfPos
-        return IfPos(RADIUS ** 2 - ((xc - 0.5) ** 2 + (yc - 0.5) ** 2), 1, 0)
-
-    def data(self, state):
-        counter = state.counter
-        state.u_true.vec.data = np.asarray(self.u_exact[counter - 1],
-                                           dtype=np.float64)
-        state.g = to_gridfunc(self.sources[counter - 1], self.Ufes)
-        state.set_z(self.noise.draw(state.u_true, state.noise_level, counter))
-
-    # f(q, z) = -div(q grad z) is affine in q: sigma = 0 and L = 0 exactly.
+    sigma = 0.0
+    L = 0.0
     # (A2) holds only formally: the pairing int q grad(z) grad(q) with q in
     # the P0 parameter space is 0 a.e., and its smoothed relaxation
     # -1/2 int q^2 Laplace z is sign-indefinite -- see mras/verify.py.
-    sigma = 0.0
-    L = 0.0
-    C_scale = 1.0
 
-    def coupling(self, q, z, s):
-        return q * Grad(z) * Grad(s)
+    def __init__(self, h=1 / 128, dt=1e-3, tend=5.0, k_u=3, k_q=0, sample=0,
+                 hdf5=None, seed=0, fitted=False):
+        nu = np.asarray(load_nu_grid(hdf5, sample=sample))
+        self.grid = nu.shape
+        domains = (pixel_square(_cells(h, nu.shape[0]), order_u=k_u,
+                                order_q=k_q) if fitted
+                   else darcy(maxh=h, order_u=k_u, order_q=k_q))
+        super().__init__(domains, dt=dt, tend=tend, k_u=k_u, seed=seed)
+        # Constant on each pixel, exact at every point of any mesh; painted on
+        # the pixel grid itself, where it lies in P0.
+        self.q_true = pixel_field(nu, linear=False)
+        self.q_domains = pixel_square(nu.shape[0], order_u=1)
+        self.u0 = U0
 
-    def coupling_adjoint(self, q, z, s):
-        return Grad(z) * Grad(s)
+    def initial_guess(self):
+        """Disk indicator a_0 for the parameter initialisation."""
+        return IfPos(RADIUS ** 2 - ((xc - 0.5) ** 2 + (yc - 0.5) ** 2), 1, 0)
 
-    def forms(self, state):
-        dt = self.dt
-        a = BilinearForm(self.X)
-        res = LinearForm(self.X)
-        a += self.u * self.v * dx
-        a += dt * Grad(self.u) * Grad(self.v) * dx
-        a += dt * self.q * Grad(state.z) * Grad(self.v) * dx
-        a += self.q * self.s * dx
-        res += state.gfu * self.v * dx
-        res += dt * state.g * self.v * dx
-        res += dt * Grad(state.z) * Grad(self.v) * dx
-        res += state.gfq * self.s * dx
-        res += dt * Grad(state.z_old) * (Grad(state.gfu) - Grad(state.z_old)) * self.s * dx
-        return a, res
+    def source(self, t):
+        """The pixel source at time ``t``: the keyframes on either side,
+        weighted linearly."""
+        s = (t.Get() - self.tstart) / SOURCE_PERIOD
+        k = round(s)
+        if abs(s - k) < 1e-9:  # on a keyframe
+            return self._keyframe(k)
+        k = int(np.floor(s))
+        theta = s - k
+        return (1 - theta) * self._keyframe(k) + theta * self._keyframe(k + 1)
+
+    def _keyframe(self, k):
+        rng = seeded_rng(self.seed, SOURCE_STREAM, k)
+        return pixel_field(rng.standard_normal(self.grid))
+
+    def coupling(self, q, u, w):
+        return q * grad(u) * grad(w)
+
+    def coupling_adjoint(self, q, u, w):
+        return grad(u) * grad(w)
+
 
 # --- runner registration (mras.live reads these markers) ----------------------
 
 PROBLEM = DarcyProblem
 
-DEFAULTS = {"darcy": dict(h=0.08, dt=0.02, tend=2.0,
-                          data_h=0.06, data_order=2)}
-CHECK = {"darcy": dict(h=0.15, dt=0.05, tend=0.5, data_h=0.08, data_order=2)}
+# P0, the class of the pixel field, on an unstructured mesh as fine as the
+# pixels; the data on one twice as fine.
+DEFAULTS = {"darcy": dict(h=1 / 128, dt=0.005, tend=100.0, k_u=2, k_q=0)}
+CHECK = {"darcy": dict(h=0.15, dt=0.05, tend=0.5)}
 QUICK = CHECK

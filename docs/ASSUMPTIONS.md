@@ -3,7 +3,11 @@
 Theory source: Kaltenbach–Aarset–Nguyen, *Data assimilation via model reference
 adaptation for linear and nonlinear dynamical systems*, AMMC 8 (2026) 80–112
 (DOI 10.3934/ammc.2026005; arXiv:2602.10920v2). Page references are to the
-typeset PDF (`MRAS_Paper.pdf`). This ledger pairs the paper's standing
+typeset PDF (`MRAS_Paper.pdf`). Its convergence theory is adapted from
+Kaltenbacher–Nguyen, Inverse Problems 37 (2021) 055006 (arXiv:2012.09908v2),
+digested with its numbering in `docs/THEORY_KN21.md`: its (A2)–(A4) are the
+(A1)–(A3) here, its coercivity is required only for `σ = 1` (Remark 1.3),
+and its persistent excitation (Remark 1.6) is Baumeister et al.'s. This ledger pairs the paper's standing
 assumptions with (i) the analytical verification per example and (ii) what the
 repository automatically checks today (`mras/verify.py`, `mras/adjoint.py`),
 plus the pipeline design for the constants we do not yet derive.
@@ -69,7 +73,7 @@ Three structural observations used throughout:
    `R(q,z) − R(q†,z) − R_q(q̃,z)(q−q†)` — the skeleton contributes *exactly
    zero*, even though `A(z)` itself is unbounded as a map `H → U*` (e.g.
    Darcy's `h ↦ −∇·(h∇z)` has no `L²`-bound). Hence **L ≡ 0 for every example
-   affine in q** (Darcy, Fisher, Burgers, Arrhenius, constant-q Helmholtz),
+   affine in q** (Darcy, Fisher, Burgers, Arrhenius),
    with nothing to prove beyond the affineness, and `L` is a non-trivial
    increasing function of `‖q‖_H` exactly when `R ≢ 0` (potential, AC).
 2. **(A3) is by construction, not by discovery.** Every operator the paper
@@ -109,7 +113,6 @@ figures are what exists today — §5 explains why they must be separated).
 | 5 | **Modified Allen–Cahn** (§7.1, same spaces) | `−Δz + q z³ + q\|q\|^{2/3} z` | `p (z³ + (5/3)\|q\|^{2/3} z)` | `s (z³ + (5/3)\|q\|^{2/3} z)` | self-adjoint multiplication; scheme op: DEVIATION 0.96 — see §4.3 | 1 | same as #4 (Prop 7.1: "Lipschitz continuity wrt. parameter remains unchanged") | `z̲ = ess inf u†`; probe OK ≥ 2.42 | same as #4 |
 | 6 | **Arrhenius exp** (repo; U=H¹₀ 4π-periodic box, H=L²) | `−Δz + q e^{z}` | `p e^{z}` | `s e^{z}` | machine (2.8e-15) | 0 | **0** exactly | `e^{z̲}` (analytic witness `c_coe()`; measured ≥ 0.748) | `−Δ` (const); `L = 0 ⇒ M̃ = M`; measured λ₁(C) = 0.125 margin |
 | 7 | **Arrhenius linear** (repo) | `−Δz + q (1+z)` | `p (1+z)` | `s (1+z)` | machine (6.8e-15) | 0 | **0** exactly | `1 + z̲` (witness ≥ 0.706) | `−Δ` (const); as #6 |
-| 8 | **Helmholtz, q = k² ∈ ℝ** (rework, §6) | `−Δz + q·r(z)` (sign matched to datum; `r(z) = −z` for `u_t = Δu + q u + g`, q = k²) | `p·r(z)` | `s·r(z)` (identified with ℝ via ∫) | scalar pairing `p s ∫r(z)dx` both sides: machine by construction | 0 | **0** (affine) | `(1/\|Ω\|) ∫ r(z) dx` — **volume average**, sign-matched (§6.3: weaker than ess-inf) | `c·(−Δ)` or `c·I_U`; `L = 0 ⇒ M̃ = M` designable |
 
 Row notes.
 *1–3:* the `z−z²` and `z ∂_x z` nonlinearities never touch (5)/(A2): both
@@ -122,9 +125,6 @@ nonlinear in u") and the reason Fisher "shares the Darcy situation".
 adjoint pair symmetrically — the pair is a *self-adjoint multiplication* by
 `r(z)`, so the adjoint is the same kernel, and the 100-draw check validates
 the implementation, not a transcription guess.
-*8:* the current repo "helmholtz" example is *not* this example (its truth
-model contains no `q`: `q_true = 0`, quadratic self-step; all checks vacuous).
-The rework is designed in §6.
 
 ---
 
@@ -191,7 +191,7 @@ own data operator, `p, s` random coefficient fields — and verify
 `|⟨f_q p, s⟩ − ⟨p, f_q* s⟩| / (|⟨f_q p, s⟩| + |⟨p, f_q* s⟩|) < 1e-10` per draw.
 This runs **at checklist time, before any solving** (the constructor only
 warns once when `coupling_adjoint` is missing), from declared hooks — it
-validates the transcription `f_q ↔ f_q*` and nothing else. All eight rows
+validates the transcription `f_q ↔ f_q*` and nothing else. All seven rows
 are expected machine precision: for
 Darcy-type it compares the two code paths `∫p∇z·∇s` (left, U*-action paired
 with s) and `∫p(∇z·∇s)` (right); the identity is real at the level of *the
@@ -215,7 +215,7 @@ Conflating the three is what made the old verdict table confusing.
 
 ## 5. The L / C pipeline: derive, or estimate on permission, never silently
 
-*Status (implementation ledger in §7): R0, R2, the §4.2 pre-verification
+*Status (implementation ledger in §6): R0, R2, the §4.2 pre-verification
 and K1 are implemented in `mras/verify.py`; R1 (closed-form template),
 R3 (prompt) and the K0 certificate remain designed-but-unbuilt.*
 
@@ -231,7 +231,7 @@ R3 (prompt) and the K0 certificate remain designed-but-unbuilt.*
   evaluated from the declared forms (finite-difference `f_q` or declared pair
   hook). Probe failure with σ=0 declared ⇒ FAIL, because (5) is an identity
   then — R0 can *fail*, which makes it a real check, not a declaration.
-  Covers rows 1, 2, 3, 6, 7, 8.
+  Covers rows 1, 2, 3, 6, 7.
 
 * **R1 — closed-form modulus, derived by a template (semi-automatic).** When
   the remainder is Nemytskii-separable, `R(q,z)(x) = ψ(q(x)) · m(z(x))`, with
@@ -306,7 +306,7 @@ construction?"
   mechanically reports UNVERIFIABLE for norm-dependent `C` (the
   potential/AC "C is norm-dependent" line — an artifact of the probe, not a
   gap in the theory). Covers rows 1–7 as implemented (`C_scale = 1`,
-  `C = c(‖q‖)·(−Δ)`), and the Helmholtz rework.
+  `C = c(‖q‖)·(−Δ)`).
 * **K1 — eigenvalue bound.** If `B` is only *a* fixed SPD form, `M̃(R) =
   c(R)·λ_min(B)` and `Ñ(R) = c(R)·λ_max(B)` — machinery exists (`_lambda1`,
   CG inverse iteration; Arrhenius λ₁ = 0.125). This is the rung that produced
@@ -327,7 +327,7 @@ wording).
 
 ### 5.4 Ladder for C_coe (A2) — unchanged, plus the remark context
 Analytic witness hook `c_coe()` (Arrhenius `ess inf r(z)` over the data box —
-rows 6–7 today, volume-average variant for row 8, §6.3; potential/AC `z̲ =
+rows 6–7 today; potential/AC `z̲ =
 ess inf u†`); else localized probe pairs (existing); else UNVERIFIABLE.
 **Interpretation upgrade:** a FAIL on Darcy-type rows is *expected from the
 paper* (Remark 4.2) and should render as
@@ -338,77 +338,18 @@ accompanying (conditional) justification, rather than an unexplained red row.
 
 ---
 
-## 6. The Helmholtz rework: recovering q = k² as a scalar
-
-### 6.1 What is wrong today
-`examples/helmholtz_in_parameter.py` identifies nothing: its truth model is
-`u_t = L Δu + g` with no parameter (`q_true = 0`), the q-update degenerates to
-the quadratic self-step, and the audit correctly reports everything vacuous
-(adjointness ratio 1.0 with "parameter absent from the truth model").
-
-### 6.2 The framework piece: Q = ℝ via NGSolve's scalar FE space
-Probed in this build (ngsolve 6.2.2608): `NumberSpace(mesh)` exists
-(top-level `ngsolve`), has `ndof = 1`, embeds in a product space
-`FESpace([H1(...), NumberSpace(mesh)])`, and **every coupling term assembles
-separately**: `q*q_*dx`, `q*u_*dx`, `u*q_*dx`, `grad(u)*grad(u_)*dx` — the
-joint space behaves as a mixed space with one scalar unknown, the scalar dof
-is set/get-able (`gf.components[1].vec[0]`) and supports CF algebra
-(`sqrt(q*q)**(2/3)` etc.). (Assembly of chained integral expressions
-`a += x*dx - y*dx + z*dx` hit an operator-algebra quirk — terms must be added
-one `+=` per integral; harmless.) The one convention to pin at
-implementation time: whether `q*q_*dx` yields `|Ω| q q̂` or `q q̂` — settle
-with a one-line assertion; the scheme must use the mass matrix it gets, and
-`H = ℝ` is then `|·|` up to that fixed factor. So the framework work is: let
-`Problem` accept a `Qfes` with `ndof = 1` (no mesh-based assumption on q) and
-give `error_q` an `H`-norm for the scalar case (the scalar absolute value —
-relative error `|q − q†|/|q†|` on `k²`, well-defined since `k² > 0`).
-
-### 6.3 Theory, scalars first (why excellent recovery is expected)
-With `Q = H = ℝ` (constants embedded in `L²(Ω)`), `f(q,z) = −Δz + q·r(z)`:
-
-* σ = 0, `f_q(q,z)p = p·r(z)` (constant multiplier), `f_q(q,z)* s = s · r(z)`
-  as `U → ℝ` (i.e. `s ↦ s ∫ r(z) dx` after identifying `ℝ* ≅ ℝ`). Pairing
-  check row of the table #8: both sides equal `p s ∫r(z)dx` — machine
-  precision for any `(q, z, p, s)` draws; the adjoint is independent of `q`
-  altogether.
-* (A1): affine ⇒ L ≡ 0 (R0, with the identity probe).
-* **(A2) with the scalar miracle:** `q − q†` factors out of the *function*:
-  `⟨f(q,z) − f(q†,z), q − q†⟩ = (q − q†)² ∫_Ω r(z) dx`. Hence
-  `C_coe = (1/|Ω|) ∫ r(z) dx` — a **volume average**, not an essential
-  infimum. Whenever `r > 0` (Arrhenius-type `r = e^z`, or `r = z` with
-  one-signed datum) monotonicity needs only the datum's *mean* to keep the
-  sign convention; the Dirichlet-datum ess-inf = 0 obstruction that kills the
-  field-parameter version evaporates. Sign convention of `+q·r(z)` vs the
-  datum must match the mean's sign — the example will *assert*
-  `C_coe > 0` at construction.
-* (A3): `L = 0` ⇒ any `C = c·B` works with `M̃ = c` (K0); the state row is a
-  linear heat solve plus a bounded zero-order coupling.
-* Expectation "excellent q recovery": this is finite-dimensional identification
-  of one scalar driven by the scalar ODE `D_t q = (lift of) ∫ r(z)(u−z)`.
-  Once `(q − q†)`-excitation `∫ r(z) (u−z) dt` is persistent (a scalar
-  version of the existing persistent-excitation check), the descent is
-  geometric with rate governed by `C′ = min{C_coe, 2M̃/C_{U→H}}` — and with a
-  well-excited scalar there is no representation floor (no P0 field to
-  resolve): relative error on `k²` should fall to the noise/discretization
-  floor, i.e. *excellent* (< 5%) and plausibly below the < 1% true target.
-  Deliverable when implemented: `examples/helmholtz_q2.py` + table row +
-  recovery figure with the standard seeded protocol.
-
----
-
-## 7. Status of the machinery vs the pipeline
+## 6. Status of the machinery vs the pipeline
 
 | rung / piece | paper | repo today | gap |
 |---|---|---|---|
-| σ switch | forced by q-linearity | `sigma` attribute; `check_a1_sigma` verifies kernel/pair consistency | — |
+| σ switch | 0 for f linear in q, 1 otherwise | `sigma` attribute, the author's choice; `check_convergence_route` reports what it gives (σ = 1: the decay estimate from (A1)–(A3); σ = 0, f affine: convergence through PE only; σ = 0, f nonlinear: none) | — |
 | L = 0 (R0) | implicit | `_probe_affine` chord-gap probe (8 draws, < 1e-9 ⇒ affine ⇒ `L = 0` exact); declared `L = 0` upgraded to analytic OK | — |
 | L closed form (R1) | rows 4–5 done by hand | manual | Nemytskii template + monotonicity-by-construction + κ provenance |
 | L estimated (R2) | — | `_estimate_lipschitz`: radius × draw grid, K-dual norm ⇒ ESTIMATED + construction-time-independent `UserWarning`; the estimate never feeds (A3) | — |
 | prompt (R3) | — | UNVERIFIABLE (reads "cannot say") | new NEEDS_INPUT status + three-branch prompt |
-| (A2) witness | rows 4–5 `z̲`; 6–7 `ess inf r(z̲)` | `c_coe()` analytic hook + localised patch probe with U_h-view relaxation; FAIL wording carries the Remark-4.2 context | volume-average hook (row 8, waits on the Helmholtz rework) |
+| (A2) witness | rows 4–5 `z̲`; 6–7 `ess inf r(z̲)` | `c_coe()` analytic hook + localised patch probe with U_h-view relaxation; FAIL wording carries the Remark-4.2 context | — |
 | (A3) certificate (K0) | tautological C | K1 done: `_lambda1` CG-preconditioned inverse iteration (local Riesz) on `C = C_scale*(-Delta)`; norm-dependent C ⇒ honest UNVERIFIABLE | form-equality certificate (K0); constructive default (K2) |
 | adjointness pre-verification | "verified assumptions" style | `check_pairing`: 100-draw declared-pair precheck against the numerical q-derivative of `coupling`, before any solving; construction warns once when `coupling_adjoint` is missing | — |
-| scalar parameter space | — | mesh-based `Qfes` assumed | `NumberSpace(mesh)` probed working; scheme + error_q adaptation |
 
 ESTIMATED (measured, extrapolated) is live in the ladder, strictly ordered
 `OK (proved/witnessed) > DEVIATION (measured, explained) >

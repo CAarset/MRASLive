@@ -25,7 +25,6 @@ behaviour only. No backwards compatibility, no shims.
 - Reproduction: seeded RNGs (deviation from paper noted), campaign runs
   main figures first, then Tables 6–8 in checkpointed parallel batches.
 - Git: linear history on `main`, clean up in place (no fresh tree).
-- Extras kept: Helmholtz dropped, **decaying-Darcy kept** as 5th demo.
 - Environment: NO global pip installs. Project venv at `.venv` (created with
   stdlib `python3 -m venv` — `uv` is not installed on this host and would
   need a global install; deviation from the usual workflow, same effect).
@@ -44,8 +43,8 @@ mras/                  package
   run.py               run(problem, cfg) → Result (errors, series, timing)
   plotting.py          publication plots (cmunrm font, colorbars, panels)
   data/pdebench.py     checksummed downloader for the PDEBench hdf5
-  problems/            darcy.py, fisher.py, potential.py, allen_cahn.py,
-                       darcy_decaying.py  (data recipes + weak-form hooks)
+  problems/            darcy.py, fisher.py, potential.py, allen_cahn.py
+                       (data recipes + weak-form hooks)
 examples/              one thin script per benchmark + figures + tables
 notebooks/             WebGUI drivers (import the package; no logic)
 tests/                 pytest suite
@@ -73,8 +72,6 @@ checkpoint commit 4749311).
       campaign via `scripts/reproduce.py --problem potential`).
 - [x] P6 Allen–Cahn (Figs 9/10/11; campaign via
       `scripts/reproduce.py --problem allen_cahn`).
-- [x] P7 Decaying-Darcy demo (`examples/darcy_decaying.py`) and Helmholtz
-      interface demo (`examples/helmholtz_in_parameter.py`).
 - [ ] P8 Campaign execution: Tables 6/7/8 + Fig 12 full-size, resumable
       handoff scripts, then `scripts/make_figures.py` panels and the
       paper-vs-new table diff (operator-run on this machine).
@@ -117,8 +114,7 @@ checkpoint commit 4749311).
   (`scripts/darcy_reproduce.py`, `scripts/reproduce.py`).
 - 2026-10-21 12:4x CEST — Final assembly: `mras/plotting.py` (headless
   field/error figures, out-of-domain pixels masked), examples (quickstart
-  runner for all four problems, Helmholtz interface demo, decaying-Darcy
-  demo), `scripts/reproduce.py` + `scripts/make_figures.py` (npz -> panels
+  runner for all four problems), `scripts/reproduce.py` + `scripts/make_figures.py` (npz -> panels
   + table.md), quickstart notebook, README, MIT LICENSE, legacy GRO/ and
   MRAS/ folders deleted (notebooks preserved in git history). Suite:
   30 passed.
@@ -128,7 +124,7 @@ checkpoint commit 4749311).
   renormalisation, per-draw seeding (seed, level, counter).
   (2) Canonical driver — fresh start per level, t=0 seeding of both error
   histories, z_old priming, Dirichlet canonicalisation, single seed knob on
-  the base Problem; trial-free BilinearForm terms (NGSolve drops them
+  the base MRASProblem; trial-free BilinearForm terms (NGSolve drops them
   silently) rewritten as implicit-increment + explicit-half pairs.
   (3) Canonical setups — deterministic paper fields everywhere (Darcy
   sin-pixel initial state and per-step N(0,1) sources, Fisher bump,

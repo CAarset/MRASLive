@@ -7,7 +7,7 @@ rerunning the same command resumes. Keep OMP_NUM_THREADS low on a busy
 machine.
 
     cd /home/aarset/Documents/MRAS
-    OMP_NUM_THREADS=4 .venv/bin/python scripts/darcy_reproduce.py --out results/darcy
+    OMP_NUM_THREADS=4 .venv/bin/python scripts/darcy_reproduce.py --out results/paper/darcy
     # or a subset:  --noise-levels 0 0.05
     # wiring check (seconds):  --micro
 
@@ -45,7 +45,7 @@ def main():
     ap.add_argument("--sample", type=int, default=0, help="PDEBench nu index")
     ap.add_argument("--seed", type=int, default=0, help="base seed; one draw per noise level")
     ap.add_argument("--noise-levels", type=float, nargs="+", default=TABLE_LEVELS)
-    ap.add_argument("--out", default="results/darcy")
+    ap.add_argument("--out", default="results/paper/darcy")
     ap.add_argument("--micro", action="store_true",
                     help="tiny setup to check wiring, not the paper numbers")
     args = ap.parse_args()
@@ -56,12 +56,13 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    series_counters = [1] + [round(t / args.dt) for t in FIG_TIMES[1:]]
-    series_counters = [c for c in series_counters if c <= round(tend / args.dt)]
+    # the initial state is always kept; these are the steps of the later times
+    series_steps = [round(t / args.dt) for t in FIG_TIMES[1:]]
+    series_steps = [n for n in series_steps if n <= round(tend / args.dt)]
     summary = {"h": h, "dt": args.dt, "tend": tend, "sample": args.sample,
                "seed": args.seed, "noise_levels": {}}
 
-    for noise_level in noise_levels:
+    for noise_level in levels:
         stem = f"darcy_{noise_level:g}".replace(".", "p")
         if (out / f"{stem}.json").exists():
             print(f"noise_level {noise_level:g}: already done, skipping")
@@ -70,7 +71,7 @@ def main():
         t0 = time.time()
         prob = _CATALOG["darcy"](h=h, dt=args.dt, tend=tend, sample=args.sample,
                             seed=args.seed)
-        prob.series_counters = tuple(series_counters)
+        prob.series_steps = frozenset(series_steps)
         result = prob.run(noise_levels=[noise_level], progress=True)[-1]
         result.save(out)
         print(f"noise_level {noise_level:g}: err_u={result.final_error_u:.6f} "

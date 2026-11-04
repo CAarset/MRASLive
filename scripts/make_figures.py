@@ -8,7 +8,7 @@ scripts/darcy_reproduce.py or scripts/reproduce.py, and writes
     <in>/fields_<noise_level>.png      u and q snapshots at the paper time instants
     <in>/table.md                markdown table of final errors
 
-    .venv/bin/python scripts/make_figures.py --problem fisher --in results/fisher
+    .venv/bin/python scripts/make_figures.py --problem fisher --in results/paper/fisher
 """
 
 import argparse
@@ -59,7 +59,7 @@ def main():
     ap.add_argument("--in", dest="indir", default=None)
     args = ap.parse_args()
 
-    indir = Path(args.indir or f"results/{args.problem}")
+    indir = Path(args.indir or f"results/paper/{args.problem}")
     spec = PROBLEMS[args.problem]
     with open(indir / "table.json") as fh:
         table = json.load(fh)

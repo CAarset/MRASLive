@@ -4,7 +4,7 @@ Run any example from the command line -- the example files themselves
 carry no argparse code::
 
     .venv/bin/python -m mras.live --help          # the catalog
-    .venv/bin/python -m mras.live burgers_pipe --quick
+    .venv/bin/python -m mras.live burgers_1d --quick
     .venv/bin/python -m mras.live darcy --config configs/darcy.yaml
     .venv/bin/python -m mras.live fisher --tend 1.0 --noise-levels 0.0 0.05
 
@@ -16,36 +16,52 @@ by the problem's ``name``.  Values layer in this order, later winning:
 constructor signature, module ``DEFAULTS``, ``QUICK`` (under ``--quick``),
 YAML ``defaults``, YAML run entry, command-line flags.
 
-In a notebook, :func:`run_live` assimilates one noise level while a six-panel
-ngsplot figure streams the solve-in-progress, and always ends with an
-animated HTML movie of the same figure:
+In a notebook, :func:`run_live` assimilates one noise level while a figure
+of ngsplot panels follows the solve step for step, and always ends with an
+MP4 movie of the same figure and an HDF5 checkpoint of the run
+(:mod:`mras.checkpoint`):
 
     from mras.live import run_live
-    result = run_live("burgers_pipe", noise_level=0.05, live=True)
+    result = run_live("burgers_1d", noise_level=0.05, live=True)
 
-Panels follow the paper layout -- datum z, data error u - z, ground-truth
-state, estimate qhat, reconstruction error qhat - q, true parameter q --
-painted by ``ngsplot.Plot``, so what you see is the finite element
-representation itself, cellwise for the L2 parameter.
+``scripts/run_examples.py`` does the same for every example, or a chosen few,
+from the command line.
+
+Under the forcing g, panels read estimate | error | reference -- state u,
+data error u - z, datum z over estimate qhat, reconstruction error
+qhat - q, true parameter q -- above a strip of the relative q error against
+time, painted by ``ngsplot.Plot``, so what you see is the finite element
+representation itself, elementwise for the L2 parameter.
 """
 
 import argparse
 import importlib.util
 import sys
+import threading
+from collections import deque
 from io import BytesIO
 from pathlib import Path
 
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
-from ngsolve import GridFunction
-from ngsplot import Plot, pyplot
+from ngsolve import (L2, CoefficientFunction, GridFunction, InnerProduct,
+                     Integrate, Norm, Parameter)
+from ngsplot import Plot, frame, render_data
 
 from .config import RunConfig, load_yaml, build as problem_from_config
 from .plotting import error_figure, evolution_figure
-from .scheme import Problem, State
+from .scheme import MRASProblem
 
 ROOT = Path(__file__).resolve().parent.parent
+#: an error panel spans this many root mean squares of the error either way
+ERROR_SPREAD = 2.0
+# The colour ranges' time constants, as fractions of the horizon: moving
+# averages over RANGE_FRACTION of it, pinned ranges patient for PIN_FRACTION.
+RANGE_FRACTION, PIN_FRACTION = 1 / 250, 0.05
+# q and qhat share q's range, padded at each end by this fraction of its
+# span, so q's own values stay clear of the colour bar's ends.
+Q_PAD = 0.05
 EXAMPLES_DIR = ROOT / "examples"
 
 
@@ -133,7 +149,9 @@ def run_example(name, config=None, quick=False, **cli):
     ``config`` is a YAML path (sweeps run in order); the keyword overrides
     are the command-line flags.  Each run saves its npz error histories,
     errors.png and final_fields.png under its ``out`` directory (by
-    default ``results/<name>``) and prints the final errors per noise level.
+    default ``results/cli/<name>``, beside -- not among -- the runs of
+    ``scripts/run_examples.py`` and the notebook in ``results/<name>``) and
+    prints the final errors per noise level.
     """
     module, cls = _locate(name)
     settings = dict(getattr(module, "DEFAULTS", {}).get(name, {}))
@@ -151,7 +169,7 @@ def run_example(name, config=None, quick=False, **cli):
         cfg = RunConfig(**{**settings, **yaml_defaults, **entry, **overrides})
         prob = problem_from_config(cls, cfg)
         noise_levels = cfg.noise_levels or [0.0, 0.05]
-        out = Path(cfg.out) if cfg.out else ROOT / "results" / prob.name
+        out = Path(cfg.out) if cfg.out else ROOT / "results" / "cli" / prob.name
         out.mkdir(parents=True, exist_ok=True)
         level_results = [prob.run_level(noise_level)
                          for noise_level in noise_levels]
@@ -187,11 +205,13 @@ def main(argv=None):
     ap.add_argument("--dt", type=float, help="time step")
     ap.add_argument("--tend", type=float, help="final time")
     ap.add_argument("--k_u", type=int, help="polynomial order of U_h")
+    ap.add_argument("--k_q", type=int,
+                    help="polynomial order of Q_h, for examples that take it")
     ap.add_argument("--seed", type=int, help="noise seed")
     ap.add_argument("--noise-levels", dest="noise_levels", type=float,
                     nargs="+", help="relative noise levels as fractions "
                                     "(0.05 is a noise level of 5%%)")
-    ap.add_argument("--out", help="output directory (default results/NAME)")
+    ap.add_argument("--out", help="output directory (default results/cli/NAME)")
     args = vars(ap.parse_args(argv))
     name = args.pop("name")
     if name is None:
@@ -204,291 +224,752 @@ def main(argv=None):
 
 # -- the live figure ---------------------------------------------------------
 
-def _minmax(gf):
-    values = gf.vec.FV().NumPy()
-    return float(values.min()), float(values.max())
+class Panels:
+    """The figure: seven ngsplot panels over an error strip.
 
+    Under the forcing, panels read estimate | error | reference::
 
-class LivePanels:
-    """The 2x3 ngsplot figure, the step callback, and the recorded frames.
+                       | forcing g                     |
+        state u        | data error u - z              | datum z
+        estimate qhat  | reconstruction error qhat - q | true parameter q
 
-    Animated panels (datum z, data error u - z, estimate qhat, and the
-    reconstruction error when the true parameter is known) are repainted by
-    :meth:`render`; the truth panels are painted once, except the final
-    state when the problem does not expose it up front and it is tracked
-    from the data layer instead.  Colour ranges are fixed from the truth
-    fields in :meth:`begin`, so colors stay comparable across frames; the
-    constructor defers all truth work so the view can open at t = 0.
+    and the strip below plots ||qhat - q|| / ||q|| against model time (the
+    data misfit ||u - z|| when q is unknown); the title reads t / tend.  The
+    strip spans the curve, from its lowest value so far to its largest (1
+    for an estimate starting at zero), so the plot moves down with it; the
+    best fit in Q_h -- the L2 floor, below which no estimate can go -- is
+    drawn dotted, and the axis reaches down to it, once the curve comes
+    within a factor two of it.  The forcing row
+    is left out when the problem has no source.  A vector state is painted
+    as its length.
 
-    Every redrawn frame is recorded; :func:`make_movie` stitches them into
-    the animated HTML.  ``live=True`` also streams the figure as a notebook
-    widget (:meth:`show`).
+    Colour ranges: q and qhat share one range, which never moves: q's
+    extremes, padded at each end by ``Q_PAD`` of its span, so q stays clear
+    of the ends of the colour bar and an estimate that over- or
+    undershoots shows as the saturated colour of an end -- converged, qhat
+    looks like q, colour for colour.  Every other panel follows its field: its ends are moving exponential
+    averages over ``range_time`` units of model time (a 250th of the
+    horizon unless given) of the field's extremes -- or, for the two
+    errors, of ``ERROR_SPREAD`` times their root mean square, so the bulk
+    of an error spans the bands and its spikes saturate red and blue.  u
+    and z share one range.  The ranges of the forcing, the state and the
+    datum are symmetric about zero, as the errors' are, unless the problem
+    guarantees the field positive (``positive_source``,
+    ``positive_state``); q is fixed as above.  For a problem that does not
+    decay (``decaying = False``, the default) the forcing, state and datum
+    ranges are pinned to their largest values so far instead, and follow a
+    field down -- gently, over 5 % of the horizon -- only after nothing has
+    come within 90 % of them for 5 % of the horizon.
+
+    The horizon is the run's length when it is known (``horizon``, a
+    movie of a finished run) and the time so far otherwise -- a run stops
+    at its target error, at a time no one knows in advance: the strip's
+    time axis then reaches the time shown, and the ranges' time constants
+    grow with the time so far.
+
+    The mesh lines are left out unless ``wireframe=True``: at the meshes
+    the examples run on, elements are a few pixels across and the lines
+    would cover the field.
+
+    :meth:`job` turns a state -- the solver's, or one stored in a
+    checkpoint -- into what :meth:`paint` paints; the live view
+    (:class:`LivePanels`) and the movie (:mod:`mras.movie`) share both.
     """
 
-    def __init__(self, prob, every=None, live=False, panel_size=(480, 360),
-                 max_frames=120):
-        if every is not None and every < 1:
-            raise ValueError("every counts steps; the smallest stride is one")
-        if every is None:
-            # Thin to about max_frames frames spread evenly over the run: a
-            # long tend then still updates at roughly its usual frequency
-            # instead of turning the view into a slow slideshow.
-            every = max(1, -(-(prob.tsteps + 1) // max_frames))
+    def __init__(self, prob, panel_width=400, range_time=None,
+                 wireframe=False, horizon=None):
+        self._range_time = range_time
+        self.horizon = horizon
+        self.t_end = None if horizon is None else prob.tstart + horizon
+        range_time, window = self._spans(horizon or 20 * prob.dt)
         self.prob = prob
-        self.every = int(every)
-        self.live = bool(live)
-        self._n = 0
-        self._image = None
-        self._w, self._h = panel_size
+        self.wireframe = bool(wireframe)
         Ufes, Qfes = prob.Ufes, prob.Qfes
 
-        self.z = GridFunction(Ufes)
+        self.u = GridFunction(Ufes)
         self.err_u = GridFunction(Ufes)
-        self.u_final = GridFunction(Ufes)
+        self.z = GridFunction(Ufes)
         self.qhat = GridFunction(Qfes)
-        self.err_q = GridFunction(Qfes)
-        self.q_true = None
-        if prob.q_true is not None:
-            self.q_true = GridFunction(Qfes)
-            self.q_true.Set(prob.q_true)
+        # q and its error are drawn exactly, not projected onto Q_h: the
+        # projection over- and undershoots q near steep layers, which would
+        # stretch the fixed range and paint a fitting error as an estimate.
+        self.q_true = prob.q_true
+        if self.q_true is not None and not isinstance(self.q_true,
+                                                      CoefficientFunction):
+            self.q_true = CoefficientFunction(self.q_true)
+        self.floor = prob.q_floor()
+        # The error panel evaluates q where the estimate lives; the q panel
+        # paints it on a mesh that follows its jumps -- its own, or the
+        # estimator's when that does (a floor of zero).
+        self.err_q = None if self.q_true is None else self.qhat - self.q_true
+        own = prob.q_domains
+        if self.q_true is not None and own is not None:
+            if not (isinstance(self.q_true, GridFunction)
+                    and self.q_true.space.mesh is own.mesh):
+                shown = GridFunction(L2(own.mesh, order=0))
+                shown.Set(self.q_true)
+                self.q_true = shown
+        elif self.floor is not None and self.floor < 1e-9:
+            # q lies in Q_h (a mesh that follows its jumps): its projection
+            # is q itself, painted element by element.  Evaluated pointwise,
+            # q would be ambiguous at the vertices on its jumps, and paint
+            # each element there with a neighbour's value.
+            self.q_true = prob.project_q(self.q_true)
+        self._q_span = (None if self.q_true is None else
+                        _padded(*_payload_range(self._payload(self.q_true))))
+        self._area = Integrate(CoefficientFunction(1.0), prob.mesh)
+        # The forcing on a time of the panels' own, rebuilt for every
+        # picture: a source may be data indexed by time (Darcy's pixel
+        # fields), not a function of t alone.
+        self._t = Parameter(prob.tstart)
+        self.g = (None if prob.source(self._t) is None
+                  else _Forcing(prob, self._t, GridFunction(Ufes).dim > 1))
+        # One camera for every panel and frame: the mesh never moves.
+        self._view = _frame(self._payload(self.u), panel_width)
+        self._w, self._h = self._view.width, self._view.height
 
-        # Final-time ground truth: precomputable when the data layer exposes
-        # it (forward snapshots or a truth hook); otherwise the problem's own
-        # data() supplies u_true step by step and the panel tracks it, so the
-        # last frame is the final-time truth.  Resolving it can mean a full
-        # forward run of the data mesh, so it waits for begin(): the view
-        # must be open at t = 0 before that starts.
-        self._truth_started = False
-        self._final_tracked = False
+        def moving(symmetric=False):
+            return _MovingRange(range_time, prob.dt, symmetric)
 
-        self.frames = []
+        def field(symmetric):
+            """The range of a field: pinned to its largest values for a
+            problem that does not decay (``decaying``), moving otherwise."""
+            if prob.decaying:
+                return moving(symmetric)
+            return _PinnedRange(window, window, prob.dt, symmetric,
+                                fast=range_time)
+        # Fields of either sign are painted symmetrically about zero, so
+        # zero is always the middle band; a field the problem guarantees
+        # positive keeps the range of its own extremes, and a vector state
+        # is painted as its length, which is never negative.
+        scalar = self.u.dim == 1
+        self._ranges = {
+            "forcing": field(scalar and not prob.positive_source),
+            "state": field(scalar and not prob.positive_state),
+            "state_err": moving(scalar),
+            "param_err": moving(True)}
+        if self.q_true is None:
+            self._ranges["param"] = moving()
+        self._bars = {}
         self._build_figure()
 
-    def _resolve_final_u(self):
-        """Fill u_final from the data layer; True when resolved upfront."""
-        snaps = self.prob._forward_data()  # generates when forward_forms given
-        if snaps is not None:
-            self.u_final.vec.data = np.asarray(snaps[-1], dtype=np.float64)
-            return True
-        if type(self.prob).truth is not Problem.truth:
-            state = State(self.prob, 0.0)
-            state.t.Set(self.prob.tend)
-            state.counter = self.prob.counter_start + self.prob.tsteps - 1
-            value = self.prob.truth(state)
-            if value is not None:
-                self.prob._set_reference(state, value)
-                self.u_final.vec.data = state.u_true.vec.Copy()
-                return True
-        return False
-
-    def begin(self, quiet=False):
-        """Resolve the final-time truth, fix the state ranges, and repaint.
-
-        The forward run that generates the observation data lives here, not
-        in the constructor, so :meth:`show` can open the view at t = 0
-        before it starts.  The first :meth:`update` begins quietly for
-        direct users who never call this.
-        """
-        if self._truth_started:
-            return
-        self._truth_started = True
-        self._final_tracked = not self._resolve_final_u()
-        if self._final_tracked:
-            entry = next(e for e in self._static if e[0] is self.u_final)
-            self._static.remove(entry)
-            self._animated.append(entry)
-        else:
-            lo, hi = _minmax(self.u_final)
-            self._state_kw.update({"autoscale": False, "vmin": lo,
-                                   "vmax": hi})
-            sym = 0.25 * (hi - lo) + 1e-12
-            self._err_kw.update({"autoscale": False, "vmin": -sym,
-                                 "vmax": sym})
-        for gf, ax, kw in self._static:
-            Plot(gf, ax=ax, colorbar=True, width=self._w, height=self._h,
-                 **kw)
-        if quiet:
-            return
-        self.render()
-        if self.live and self._image is not None:
-            self._image.value = self._png()
-
-    def _range_kwargs(self, lo, hi):
-        return {"autoscale": False, "vmin": lo, "vmax": hi} if lo is not None \
-            else {"autoscale": True}
-
+    # -- layout ---------------------------------------------------------------
     def _build_figure(self):
-        # Ranges taken from the truth wait for begin(); the state and error
-        # panels start autoscaled.  Parameter ranges come from the problem's
-        # coefficient and are known at construction.
-        self._state_kw = {"autoscale": True}
-        self._err_kw = {"autoscale": True}
+        # A vector state is painted as its length, which the titles say:
+        # one component alone would be a different picture of the flow.
+        vector = self.u.dim > 1
+
+        def shown(gf, label):
+            if not vector:
+                return gf, rf"${label}$"
+            return Norm(gf), rf"$|{label}|$"
+
+        rows = []
+        if self.g is not None:
+            label = r"$|g|$" if vector else r"$g$"
+            rows.append([None, (self.g, f"forcing {label}", "forcing"), None])
+        u, label_u = shown(self.u, "u")
+        err, label_err = shown(self.err_u, "u - z")
+        z, label_z = shown(self.z, "z")
+        rows.append([(u, f"state {label_u}", "state"),
+                     (err, f"data error {label_err}", "state_err"),
+                     (z, f"datum {label_z}", "state")])
         if self.q_true is None:
-            q_kw = q_err_kw = {"autoscale": True}
+            rows.append([(self.qhat, r"estimate $\hat q$", "param")])
         else:
-            lo, hi = _minmax(self.q_true)
-            q_kw = self._range_kwargs(lo, hi)
-            sym = 0.25 * (hi - lo) + 1e-12
-            q_err_kw = self._range_kwargs(-sym, sym)
+            rows.append([(self.qhat, r"estimate $\hat q$", "estimate"),
+                         (self.err_q, r"reconstruction error $\hat q - q$",
+                          "param_err"),
+                         (self.q_true, r"true parameter $q$", "param")])
+            self._q_kw = _range_kwargs(*self._q_span)
 
-        # (gf, title, range kwargs, animated?) in panel order
-        spec = [(self.z, "datum z", self._state_kw, True),
-                (self.err_u, "data error u - z", self._err_kw, True),
-                (self.u_final, "ground truth u at final time",
-                 self._state_kw, self._final_tracked),
-                (self.qhat, "estimate qhat", q_kw, True)]
-        if self.q_true is not None:
-            spec += [
-                (self.err_q, "reconstruction error qhat - q", q_err_kw, True),
-                (self.q_true, "true parameter q", q_kw, False)]
-
-        self.figure = Figure(figsize=(4.8 * 3 + 1.2, 3.6 * 2 + 1.4),
-                             dpi=100)
+        # Laid out in pixels at dpi 100.  Each picture's axes is exactly its
+        # canvas, so it lands one to one (no resampling of the mesh lines, no
+        # raster wasted), and its colourbar gets a fixed slot of its own:
+        # under the picture for a wide domain, where a bar beside it would be
+        # as short as the domain is thin, beside it otherwise.
+        w, h = self._w, self._h
+        wide = w / h >= 1.8
+        cell_w, cell_h = (w, h + 46) if wide else (w + 86, h)
+        gap, top, title, row_gap = 34, 52, 24, 36
+        strip_gap, strip_h, bottom = 46, 190, 52
+        width = 3 * cell_w + 4 * gap
+        height = (top + len(rows) * (title + cell_h) + (len(rows) - 1) * row_gap
+                  + strip_gap + strip_h + bottom)
+        self.figure = Figure(figsize=(width / 100, height / 100), dpi=100)
         FigureCanvasAgg(self.figure)
-        # The right margin carries the right-hand column's colourbar: bar
-        # plus tick labels measures about 0.06 of the figure width past the
-        # picture, and the figure does not grow to fit it.
-        self.figure.subplots_adjust(left=0.02, right=0.93, top=0.91,
-                                    bottom=0.03, hspace=0.45, wspace=0.55)
-        axes = self.figure.subplots(2, 3)
+
+        def rect(x, y, rw, rh):  # pixels from the top left -> figure fractions
+            return (x / width, 1 - (y + rh) / height, rw / width, rh / height)
+
         self._animated, self._static = [], []
-        for ax, (gf, title, kw, animated) in zip(axes.ravel(), spec):
-            ax.set_title(title, fontsize=9)
-            bucket = self._animated if animated else self._static
-            bucket.append((gf, ax, kw))
-        for ax in axes.ravel()[len(spec):]:
-            ax.set_visible(False)
-        self.render()
-        for gf, ax, kw in self._static:
-            Plot(gf, ax=ax, colorbar=True, width=self._w, height=self._h,
-                 **kw)
+        for row, panels in enumerate(rows):
+            for col, panel in enumerate(panels):
+                if panel is None:
+                    continue
+                gf, label, kind = panel
+                x = gap + col * (cell_w + gap)
+                y = top + title + row * (title + cell_h + row_gap)
+                ax = self.figure.add_axes(rect(x, y, w, h))
+                ax.set_title(label, fontsize=9)
+                if wide:
+                    bar = rect(x + 0.04 * w, y + h + 8, 0.92 * w, 10)
+                else:
+                    bar = rect(x + w + 6, y + 0.04 * h, 12, 0.92 * h)
+                self._bars[ax] = {"cax": self.figure.add_axes(bar),
+                                  "orientation": "horizontal" if wide
+                                  else "vertical"}
+                bucket = self._static if gf is self.q_true else self._animated
+                bucket.append((gf, ax, kind))
+        for gf, ax, kind in self._static:
+            self._plot(ax, self._payload(gf), self._kwargs(kind))
 
-    def render(self):
-        """Repaint the animated panels from the current grid functions."""
-        for gf, ax, kw in self._animated:
-            Plot(gf, ax=ax, colorbar=True, width=self._w, height=self._h,
-                 **kw)
+        ax = self._strip = self.figure.add_axes(
+            rect(70, height - bottom - strip_h, width - 70 - gap, strip_h))
+        if self.q_true is not None:
+            label = r"$\|\hat q - q\| \,/\, \|q\|$"
+        else:
+            label = r"data misfit $\|u - z\|$"
+        (self._line,) = ax.semilogy([], [], color="C0", lw=1.4, label=label)
+        # The L2 floor, below which no estimate in Q_h goes, dotted.
+        self._floors = {}
+        if self.floor:
+            self._floors["l2"] = ax.axhline(
+                self.floor, color="0.55", ls=":", lw=0.9,
+                label=r"best fit in $Q_h$", visible=False)
+        ax.set_xlim(self.prob.tstart, self._axis_end(self.prob.tstart))
+        ax.set_xlabel("t", fontsize=9)
+        ax.tick_params(labelsize=8)
+        ax.grid(True, which="both", alpha=0.3)
+        self._legend()
+        self._title = self.figure.suptitle("", fontsize=11)
 
-    def _png(self):
+    def _spans(self, horizon):
+        """The moving averages' time and the pinned ranges' window, for a
+        run of length ``horizon``."""
+        return (self._range_time or RANGE_FRACTION * horizon,
+                PIN_FRACTION * horizon)
+
+    def _rescale(self, horizon):
+        """The ranges' time constants for a run of length ``horizon``."""
+        moving, window = self._spans(horizon)
+        for track in self._ranges.values():
+            if isinstance(track, _MovingRange):
+                track.tau = moving
+            elif isinstance(track, _PinnedRange):
+                track.patience = track.tau = window
+                track.fast = track._low.tau = moving
+
+    def _legend(self):
+        handles = [self._line] + [line for line in self._floors.values()
+                                  if line.get_visible()]
+        self._strip.legend(handles=handles, loc="upper right", fontsize=8)
+
+    def _payload(self, field):
+        if isinstance(field, _Forcing):
+            field = field.field()
+        if isinstance(field, GridFunction):
+            return render_data(field)
+        return render_data(field, self.prob.mesh)
+
+    def _plot(self, ax, payload, kw):
+        """Paint one panel; its colourbar, on the panel's own slot, follows."""
+        Plot(payload, ax=ax, view=self._view, wireframe=self.wireframe,
+             colorbar=self._bars[ax], **kw)
+        self._bars[ax]["cax"].tick_params(labelsize=7)
+
+    def _kwargs(self, kind):
+        if kind in ("param", "estimate") and self.q_true is not None:
+            return self._q_kw
+        return self._ranges[kind].kwargs()
+
+    # -- a state into a picture ---------------------------------------------
+    def fill(self, t, u, z, q):
+        """Put a state into the panels' grid functions: the coefficient
+        vectors of u, z on U_h and q on Q_h at time ``t``."""
+        self.u.vec.FV().NumPy()[:] = u
+        self.z.vec.FV().NumPy()[:] = z
+        self.err_u.vec.FV().NumPy()[:] = u - z
+        self.qhat.vec.FV().NumPy()[:] = q
+        if self.g is not None:
+            self._t.Set(t)
+            self.g.update()
+
+    def extremes(self):
+        """The payloads of the animated panels, and the span each kind of
+        panel is to be painted over (u and z share one).
+
+        A field's span is its extremes; an error's is ``ERROR_SPREAD``
+        times its root mean square instead -- an error's extremes are
+        spikes (a corner, an overshoot at a hole), and a range set by them
+        leaves the rest of the field one colour.
+        """
+        payloads = [self._payload(gf) for gf, _, _ in self._animated]
+        errors = {"state_err": self.err_u, "param_err": self.err_q}
+        seen = {}
+        for payload, (_, _, kind) in zip(payloads, self._animated):
+            if kind in errors:
+                field = errors[kind]
+                rms = (Integrate(InnerProduct(field, field), self.prob.mesh,
+                                 order=2 * self.prob.order) / self._area) ** 0.5
+                lo, hi = (-ERROR_SPREAD * rms, ERROR_SPREAD * rms)
+                if self._ranges[kind].symmetric is False:  # a length
+                    lo = 0.0
+            else:
+                lo, hi = _payload_range(payload)
+            if kind in seen:
+                lo, hi = min(lo, seen[kind][0]), max(hi, seen[kind][1])
+            seen[kind] = (lo, hi)
+        return payloads, {kind: span for kind, span in seen.items()
+                          if kind in self._ranges}
+
+    def job(self, t, history, offset, ranges=None, payloads=None):
+        """Everything :meth:`paint` needs for the filled state at time t.
+
+        ``history`` is the error history up to t (the misfit, from step 1,
+        with ``offset`` 1, when q is unknown).  Without ``ranges`` the
+        moving colour ranges take this state in; with them (kind -> the
+        keywords of :func:`_range_kwargs`) they are used as given -- the
+        movie computes them for every frame in order first.
+        """
+        if payloads is None:
+            payloads, seen = self.extremes()
+            if ranges is None:
+                if self.horizon is None:  # the run's length is not known yet
+                    self._rescale(max(t - self.prob.tstart,
+                                      20 * self.prob.dt))
+                for kind, (lo, hi) in seen.items():
+                    self._ranges[kind].add(t, lo, hi)
+        history = np.asarray(history)
+        title = f"{self.prob.name}    t = {t:.2f}"
+        if self.t_end is not None:
+            title += f" / {self.t_end:g}"
+        if self.q_true is not None and offset == 0 and len(history):
+            title += rf"    $\|\hat q - q\| \,/\, \|q\|$ = {history[-1]:.4f}"
+
+        def kwargs(kind):
+            if ranges is not None and kind in ranges:
+                return dict(ranges[kind])
+            return dict(self._kwargs(kind))
+        return {"t": t, "title": title,
+                "panels": [(ax, payload, kwargs(kind))
+                           for payload, (_, ax, kind)
+                           in zip(payloads, self._animated)],
+                "times": self.prob.tstart
+                + (np.arange(len(history)) + offset) * self.prob.dt,
+                "history": history}
+
+    def paint(self, job):
+        """Paint a job into the figure; return it as PNG bytes."""
+        for ax, payload, kw in job["panels"]:
+            self._plot(ax, payload, kw)
+        times, history = job["times"], job["history"]
+        stride = max(1, len(history) // 4000)  # plenty for a strip this wide
+        times, history = times[::stride], history[::stride]
+        self._line.set_data(times, history)
+        self._strip.set_xlim(self.prob.tstart, self._axis_end(job["t"]))
+        shown = history[history > 0]
+        if shown.size:
+            # The axis spans the curve, from the lowest error so far to the
+            # largest; once the curve comes within a factor two of a line,
+            # the line shows and the axis reaches down to it (just below,
+            # so it clears the frame).
+            low, high = shown.min(), shown.max()
+            values = {"l2": self.floor}
+            changed = False
+            bottom = low
+            for kind, line in self._floors.items():
+                value = values[kind]
+                near = value is not None and bool(low <= 2 * value)
+                if near:
+                    line.set_ydata([value, value])
+                    bottom = min(bottom, value / 1.03)
+                if near != line.get_visible():
+                    line.set_visible(near)
+                    changed = True
+            if high <= bottom:  # a single point
+                high = bottom * 1.03
+            self._strip.set_ylim(bottom, high)
+            if changed:
+                self._legend()
+        self._title.set_text(job["title"])
+        return self.png()
+
+    def _axis_end(self, t):
+        """The strip's time axis: to the run's end when it is known, else
+        to the time ``t`` the picture shows."""
+        if self.t_end is not None:
+            return self.t_end
+        return max(t, self.prob.tstart + self.prob.dt)
+
+    def png(self):
         buffer = BytesIO()
         self.figure.savefig(buffer, format="png")
         return buffer.getvalue()
 
+
+class LivePanels(Panels):
+    """The figure, following a run: the run's on_step hook.
+
+    Painting never holds up the solve.  :meth:`update` copies the fields
+    into the panels' grid functions and builds their payloads on the
+    solver's thread (a few milliseconds), and a background thread
+    rasterises them -- NGSolve releases the GIL while it assembles and
+    solves, so the two run side by side.  A new picture is queued whenever
+    the painter is idle, so the view shows the newest step it can.  The
+    movie is not painted here: it is rendered from the run's checkpoint
+    afterwards (:mod:`mras.movie`).
+    """
+
+    def __init__(self, prob, **kwargs):
+        super().__init__(prob, **kwargs)
+        self._jobs = deque()
+        self._cond = threading.Condition()
+        self._busy = self._closing = False
+        self._worker = None
+        self._error = None
+        self._error_raised = False
+        self._newest_png = None
+        self._image = None
+        self.painted = 0  # pictures painted so far
+
+    def update(self, state):
+        """The run's on_step hook: queue this step when the painter is idle."""
+        if self._error is not None and not self._error_raised:
+            self._error_raised = True
+            raise RuntimeError("the live view's painter failed") from self._error
+        self._show_newest()
+        with self._cond:
+            idle = not self._jobs and not self._busy
+        if idle:
+            self._submit(self._state_job(state))
+
+    def _state_job(self, state):
+        z = state.z if state.z_started else state.u_true  # no datum before step 1
+        self.fill(state.t.Get(), state.gfu.vec.FV().NumPy(),
+                  z.vec.FV().NumPy(), state.gfq.vec.FV().NumPy())
+        if state.error_q is not None:
+            history, offset = state.error_q, 0
+        else:
+            history, offset = state.misfit_u, 1
+        return self.job(state.t.Get(), list(history), offset)
+
+    def _submit(self, job):
+        with self._cond:
+            self._jobs.append(job)
+            self._cond.notify()
+        if self._worker is None:
+            self._worker = threading.Thread(target=self._work, daemon=True,
+                                            name="mras-live-painter")
+            self._worker.start()
+
+    def _show_newest(self):
+        with self._cond:
+            png, self._newest_png = self._newest_png, None
+        if png is not None and self._image is not None:
+            self._image.value = png
+
+    # -- the painter thread ---------------------------------------------------
+    def _work(self):
+        while True:
+            with self._cond:
+                while not self._jobs and not self._closing:
+                    self._cond.wait()
+                if not self._jobs:
+                    return
+                job = self._jobs.popleft()
+                self._busy = True
+            try:
+                png = self.paint(job)
+            except BaseException as err:  # surfaced on the solver's thread
+                with self._cond:
+                    self._error = err
+                    self._jobs.clear()
+                    self._busy = False
+                return
+            with self._cond:
+                self._newest_png = png
+                self.painted += 1
+                self._busy = False
+
+    # -- notebook display and shutdown ---------------------------------------
     def show(self):
-        """Display the panel figure inline, streaming updates while solving."""
+        """Display the figure inline; later pictures replace it as they land."""
         try:
             from IPython.display import display
             from ipywidgets import Image
         except ImportError:
             return
-        self.render()
-        self._image = Image(value=self._png(), format="png")
+        self._image = Image(value=self.png(), format="png")
         display(self._image)
 
-    def update(self, state, force=False):
-        """Refresh all panels from the current scheme state (throttled)."""
-        self.begin(quiet=True)  # the t = 0 frame carries the truth ranges
-        self._n += 1
-        if not force and self._n > 1 and self._n % self.every:
-            return  # the first frame, the t = 0 one, is never skipped
-        self.z.vec.data = state.z.vec.Copy()
-        self.err_u.vec.data = state.gfu.vec.Copy()
-        self.err_u.vec.data -= state.z.vec.Copy()
-        self.qhat.vec.data = state.gfq.vec.Copy()
-        if self.q_true is not None:
-            self.err_q.vec.data = state.gfq.vec.Copy()
-            self.err_q.vec.data -= self.q_true.vec.Copy()
-        if self._final_tracked and state.has_truth:
-            self.u_final.vec.data = state.u_true.vec.Copy()
-        snap = lambda gf: np.asarray(gf.vec.data).copy()
-        self.frames.append(tuple(snap(gf) for gf, _, _ in self._animated))
-        if self.live:
-            self.render()
-            if self._image is not None:
-                self._image.value = self._png()
+    def close(self, state=None, drain=True):
+        """Paint the final state and stop the painter.
+
+        ``drain=False`` (an interrupted run) drops the pictures still queued
+        instead of painting them.
+        """
+        if state is not None and self._error is None:
+            self._submit(self._state_job(state))
+        with self._cond:
+            if not drain:
+                self._jobs.clear()
+            self._closing = True
+            self._cond.notify_all()
+        if self._worker is not None:
+            self._worker.join()
+        self._show_newest()
+        if self._error is not None and not self._error_raised:
+            self._error_raised = True
+            raise RuntimeError("the live view's painter failed") from self._error
 
 
-def make_movie(panels, path, fps=24.0, max_frames=120):
-    """Stitch the recorded frames into an animated HTML and return the path.
+class _Forcing:
+    """The source at the panels' time, painted as the coefficient itself.
 
-    The frames replay the panel figure through ngsplot -- the same FEM
-    rendering as the live view -- with the fixed color ranges set at
-    construction, so every frame covers the same amount of model time and
-    colors are comparable across it.  Frames are thinned to ``max_frames``
-    and the last one is always kept.
+    Projected onto U_h, a source with sharp features -- a beam's edge, a
+    shadow -- would be painted with the projection's over- and undershoots
+    (``GridFunction.Set`` is a local L2 projection: a positive source showed
+    -4 against a peak of 30), and the solver never uses such a projection:
+    it integrates the coefficient.  Sampled where it is painted, the source
+    is shown as it is.
     """
-    if not panels.frames:
-        raise ValueError("make_movie needs recorded frames; run_live records "
-                         "them automatically")
-    from matplotlib.animation import FuncAnimation
 
-    n = len(panels.frames)
-    stride = -(-n // max_frames)  # ceil
-    keep = list(range(0, n, stride))
-    if keep[-1] != n - 1:
-        keep.append(n - 1)
-    gfs = [gf for gf, _, _ in panels._animated]
+    def __init__(self, prob, t, vector):
+        self.prob, self.t, self.vector = prob, t, vector
+        self.cf = None
 
-    def draw(i):
-        for gf, arr in zip(gfs, panels.frames[keep[i]]):
-            gf.vec.data = np.asarray(arr, dtype=np.float64)
-        panels.render()
+    def update(self):
+        self.cf = CoefficientFunction(self.prob.source(self.t))
 
-    anim = FuncAnimation(panels.figure, draw, frames=range(len(keep)),
-                         init_func=lambda: None, cache_frame_data=True)
-    html = anim.to_jshtml(fps=fps, default_mode="loop")
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(html)
-    pyplot.close(panels.figure)
-    return path
+    def field(self):
+        return Norm(self.cf) if self.vector else self.cf
+
+
+def _frame(payload, width, max_height=300):
+    """The camera of a panel framed on the box of the mesh, and its canvas.
+
+    ``width`` wide and as tall as the box makes it, unless that is taller
+    than ``max_height``: then ``max_height`` tall and as wide as the box
+    makes it.  Nothing is painted to find out.
+    """
+    view = frame(payload, width=width, height=None, fit="box")
+    if view.height > max_height:
+        view = frame(payload, width=None, height=max_height, fit="box")
+    return view
+
+
+class _MovingRange:
+    """A colour range that follows a field: moving averages of its extremes.
+
+    Each sampled minimum and maximum is weighted by the model time it stands
+    for and discounted by exp(-age / tau), and the sums are normalised by the
+    total weight, so the range starts at the first extremes rather than
+    being pulled up from zero.  A flat field (a state at rest) says nothing
+    about the range and is skipped; until a sample arrives the panel
+    autoscales.
+    """
+
+    def __init__(self, tau, step, symmetric=False):
+        self.tau, self.step, self.symmetric = tau, step, symmetric
+        self._sums = np.zeros(2)
+        self._weight = 0.0
+        self._t = None
+
+    def add(self, t, lo, hi):
+        if self.symmetric:
+            hi = max(abs(lo), abs(hi))
+            lo = -hi
+        if not hi - lo > 1e-12 * max(1.0, abs(hi), abs(lo)):
+            return
+        span = self.step if self._t is None else max(t - self._t, self.step)
+        keep = np.exp(-span / self.tau)
+        self._sums = keep * self._sums + (1.0 - keep) * np.array([lo, hi])
+        self._weight = keep * self._weight + (1.0 - keep)
+        self._t = t
+
+    def kwargs(self):
+        if self._weight == 0.0:
+            return {"autoscale": True}
+        return _range_kwargs(*(self._sums / self._weight))
+
+    def fresh(self):
+        """The same range, unstarted."""
+        return _MovingRange(self.tau, self.step, self.symmetric)
+
+
+class _PinnedRange:
+    """A colour range pinned to the largest values seen so far.
+
+    For a field that does not decay: the upper end -- both ends, for a range
+    symmetric about zero -- is the running maximum, and it starts to follow
+    the field down, as a moving exponential average over ``tau``, only once
+    no value has come within ``near`` of it for ``patience`` units of model
+    time; a new maximum pins it again.  The lower end of a range that is not
+    symmetric follows the field's minimum with a :class:`_MovingRange` over
+    ``fast``.
+    """
+
+    def __init__(self, patience, tau, step, symmetric=False, near=0.9,
+                 fast=None):
+        self.patience, self.tau, self.step = patience, tau, step
+        self.symmetric, self.near = symmetric, near
+        self.fast = fast if fast is not None else tau
+        self.high = None
+        self._near_at = self._t = None
+        self._low = _MovingRange(self.fast, step)
+
+    def add(self, t, lo, hi):
+        if self.symmetric:
+            hi = max(abs(lo), abs(hi))
+        if not hi > 1e-12 * max(1.0, abs(lo)) and self.high is None:
+            return  # a field at rest says nothing yet
+        if self.high is None or hi >= self.high:
+            self.high, self._near_at = hi, t
+        elif hi >= self.near * self.high:
+            self._near_at = t
+        elif t - self._near_at > self.patience:
+            keep = np.exp(-max(t - self._t, self.step) / self.tau)
+            self.high = keep * self.high + (1.0 - keep) * hi
+        self._t = t
+        if not self.symmetric:
+            self._low.add(t, lo, max(hi, lo + 1e-300))
+
+    def kwargs(self):
+        if self.high is None:
+            return {"autoscale": True}
+        if self.symmetric:
+            return _range_kwargs(-self.high, self.high)
+        low = self._low.kwargs()
+        return _range_kwargs(low.get("vmin", 0.0), self.high)
+
+    def fresh(self):
+        """The same range, unstarted."""
+        return _PinnedRange(self.patience, self.tau, self.step,
+                            self.symmetric, self.near, self.fast)
+
+
+def _payload_range(payload):
+    return float(payload["funcmin"]), float(payload["funcmax"])
+
+
+def _padded(lo, hi):
+    """The range of q, padded at each end by ``Q_PAD`` of its span (of its
+    size, for a constant q)."""
+    pad = Q_PAD * ((hi - lo) or max(abs(hi), 1.0))
+    return lo - pad, hi + pad
+
+
+def _range_kwargs(lo, hi):
+    return {"autoscale": False, "vmin": lo, "vmax": hi}
+
+
+def _evenly(n, k):
+    """Up to k indices spread evenly over range(n), first and last kept."""
+    return sorted({round(i) for i in np.linspace(0, n - 1, min(n, k))})
+
+
+def _in_notebook():
+    try:
+        from IPython import get_ipython
+    except ImportError:
+        return False
+    shell = get_ipython()
+    return shell is not None and "IPKernelApp" in shell.config
 
 
 def _display_movie(path):
-    """Show the animated movie inline when a notebook front-end is present."""
+    """Show the movie inline in a notebook, embedded so that it survives
+    re-opening the notebook without the file."""
     print(f"movie: {path}")
-    try:
-        from IPython.display import HTML, display
-    except ImportError:
-        return
-    display(HTML(Path(path).read_text()))
+    if _in_notebook():
+        from IPython.display import Video, display
+        display(Video(str(path), embed=True, html_attributes="controls loop"))
 
 
-def run_live(example, noise_level=0.0, every=None, live=False, dt=None,
-             tend=None, fps=24.0, path=None, max_frames=120, **kwargs):
-    """Assimilate one noise level with the six-panel ngsplot view.
+def run_live(example, noise_level=0.0, live=False, dt=None, tend=None,
+             target=None, q0=None, fps=None, path=None, checkpoint=True,
+             budget=256.0, movie=True, every=None, workers=None, **kwargs):
+    """Assimilate one noise level; write its checkpoint and movie.
 
     ``example`` is a name from :func:`list_examples` (or an already-built
-    ``Problem``); ``noise_level`` is the relative L2 noise of the data
+    ``MRASProblem``); ``noise_level`` is the relative L2 noise of the data
     (``0.05`` = a noise level of 5 %); ``dt`` and ``tend`` are the step
-    size and the horizon of the assimilation.  The view opens at t = 0
-    before the data-generating forward run starts, then refreshes every
-    ``every`` steps -- by default thinned to about ``max_frames`` evenly
-    spread frames, so any horizon takes roughly the same number of
-    updates.  The frames are always recorded and stitched into an animated
-    HTML movie (``results/<name>_noise<p>.html`` unless ``path`` says
-    otherwise), displayed inline; ``live=True`` adds the streaming figure
-    while the solve runs.  Returns the :class:`~mras.results.LevelResult`.
+    size and the time limit of the assimilation, which stops earlier once
+    the reconstruction error reaches ``target`` (max(1 %, 1.25 times the
+    floor) unless given; 0 runs to ``tend``); ``q0`` is the initial
+    estimate qhat_0 (a number, coefficient or grid function), the
+    example's own unless given (0 for most).  Data are generated in
+    lockstep with the estimator, so with ``live=True`` the view opens at
+    t = 0 and follows the solve from its first step, repainting whenever
+    the painter is free.
+
+    The run is written to an HDF5 checkpoint (:mod:`mras.checkpoint`:
+    settings, histories, the trajectory within ``budget`` megabytes --
+    every step with ``budget=None`` -- and a restart point), and the movie
+    is rendered from it afterwards (:mod:`mras.movie`): a frame for every
+    stored step, up to 1200, lasting 4 to 10 seconds (``every`` and ``fps``
+    override the pace), painted by ``workers`` processes, and shown inline
+    in a notebook.  ``path`` is the stem of both files,
+    ``results/<name>/<name>_noise<p>-notebook`` unless given -- beside the
+    run of ``scripts/run_examples.py`` in the same folder; with
+    ``checkpoint=False`` the checkpoint is a temporary file, deleted once
+    the movie is made.  Returns the :class:`~mras.results.LevelResult`.
     """
+    import tempfile
+    from .checkpoint import Checkpoint
+    from .movie import render_movie
     if dt is not None:
         kwargs["dt"] = dt
     if tend is not None:
         kwargs["tend"] = tend
-    prob = example if isinstance(example, Problem) else build(example, **kwargs)
-    panels = LivePanels(prob, every=every, live=live, max_frames=max_frames)
-    if live:
-        panels.show()  # open the view before the truth run can outlast it
-    panels.begin()
-    prob.on_step = panels.update
+    prob = (example if isinstance(example, MRASProblem)
+            else build(example, **kwargs))
+    if q0 is not None:
+        prob.q0 = q0
+    if target is not None:
+        prob.target = target
+    stem = Path(path) if path is not None else (
+        ROOT / "results" / prob.name
+        / f"{prob.name}_noise{noise_level:g}-notebook"
+        )
+    scratch = None
+    if checkpoint:
+        file = Path(f"{stem}.h5")
+    else:
+        scratch = tempfile.TemporaryDirectory()
+        file = Path(scratch.name) / "run.h5"
+
+    writer = Checkpoint(prob, file, noise_level, budget)
+    panels = LivePanels(prob) if live else None
+    hooks = [writer.update] + ([panels.update] if panels is not None else [])
+    if panels is not None:
+        panels.show()
+    prob.on_step = lambda state: [hook(state) for hook in hooks]
+
     try:
-        result = prob.run_level(noise_level, progress=False)
+        result = prob.run_level(noise_level, progress=panels is None)
+    except BaseException:
+        if panels is not None:
+            panels.close(drain=False)
+        raise
     finally:
         prob.on_step = None
-    panels.update(result.state, force=True)
-    if path is None:
-        path = ROOT / "results" / f"{prob.name}_noise{noise_level:g}.html"
-    movie = make_movie(panels, path, fps=fps, max_frames=max_frames)
-    _display_movie(movie)
+
+    writer.close(result.state)
+    if panels is not None:
+        panels.close(result.state)
+
+    if checkpoint:
+        print(f"checkpoint: {file}")
+    if movie:
+        movie_file = Path(f"{stem}.mp4")
+        _display_movie(render_movie(file, movie_file, fps=fps,
+                                    every=every, workers=workers,
+                                    problem=prob))
+    if scratch is not None:
+        scratch.cleanup()
+
     return result
 
 

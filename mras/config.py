@@ -4,7 +4,7 @@ Every field is optional: an unset field inherits the example's ``DEFAULTS``
 (the problem class's own keyword defaults being the floor), so the YAML is
 the control switch that tweaks values, never a file that must restate them.
 Unknown keys are kept and forwarded to the problem constructor, which lets
-problem-specific knobs (``data_h``, ``tsteps``, ...) live in the YAML too.
+problem-specific knobs (``q_h``, ``tsteps``, ...) live in the YAML too.
 
 A configuration file is either
 
@@ -38,6 +38,8 @@ class RunConfig(BaseModel):
     tend: float | None = Field(None, gt=0)
     k_u: int | None = Field(None, ge=1, le=8,
                             description="polynomial order of U_h")
+    k_q: int | None = Field(None, ge=0, le=8,
+                            description="polynomial order of Q_h (L2)")
     seed: int | None = None
     noise_levels: list[float] | None = Field(
         None, description="relative noise levels, fractions (0.05 = 5%)")
@@ -52,13 +54,13 @@ class RunConfig(BaseModel):
             raise ValueError("noise_levels must be non-empty and non-negative")
         return v
 
-    def counters(self):
-        """Step indices (``State.counter`` convention: state of ``t`` at
-        index counter - 1) closest to the requested times."""
+    def steps(self):
+        """The steps n (the states at t = n dt) closest to the requested
+        times."""
         if self.dt is None:
-            raise ValueError("counters() needs dt; the constructor's own "
-                             "series_counters covers the standard snapshots")
-        return sorted({max(1, round(t / self.dt) + 1) for t in self.times})
+            raise ValueError("steps() needs dt; the constructor's own "
+                             "series_steps covers the standard snapshots")
+        return sorted({round(t / self.dt) for t in self.times})
 
 
 def load_yaml(path) -> tuple[dict, list[dict]]:

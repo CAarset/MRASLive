@@ -60,16 +60,17 @@ def main():
     h = 0.2 if args.micro else (args.h or 0.1)
     tend = 0.02 if args.micro else args.tend  # None -> paper run length
     levels = [0.0, 0.05] if args.micro else (args.noise_levels or spec["noise_levels"])
-    out = Path(args.out or f"results/{args.problem}")
+    out = Path(args.out or f"results/paper/{args.problem}")
     out.mkdir(parents=True, exist_ok=True)
 
     t_end = tend if tend is not None else spec["tend"]
-    series_counters = [1] + [round(t / args.dt) for t in spec["times"][1:]]
-    series_counters = [c for c in series_counters if c <= round(t_end / args.dt)]
+    # the initial state is always kept; these are the steps of the later times
+    series_steps = [round(t / args.dt) for t in spec["times"][1:]]
+    series_steps = [n for n in series_steps if n <= round(t_end / args.dt)]
     summary = {"problem": args.problem, "h": h, "dt": args.dt,
                "tend": t_end, "seed": args.seed, "noise_levels": {}}
 
-    for noise_level in noise_levels:
+    for noise_level in levels:
         stem = f"{args.problem}_{noise_level:g}".replace(".", "p")
         if (out / f"{stem}.json").exists():
             print(f"noise_level {noise_level:g}: already done, skipping")
@@ -81,7 +82,7 @@ def main():
         if tend is not None:
             kwargs["tend"] = tend
         prob = spec["cls"](**kwargs)
-        prob.series_counters = tuple(series_counters)
+        prob.series_steps = frozenset(series_steps)
         result = prob.run(noise_levels=[noise_level], progress=True)[-1]
         result.save(out)
         print(f"noise_level {noise_level:g}: err_u={result.final_error_u:.6f} "

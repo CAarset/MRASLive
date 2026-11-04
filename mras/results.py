@@ -25,6 +25,10 @@ class LevelResult:
     # ||u - z|| per step: reported for every run, error histories only
     # when a ground truth is available.
     misfit_u: np.ndarray | None = None
+    # ||u - z|| / ||z|| after every step, and the effective noise level:
+    # the same for the reference state at P_h q^dagger (mras.robust).
+    effective_noise: np.ndarray | None = None
+    residual: np.ndarray | None = None
 
     @property
     def final_error_u(self):

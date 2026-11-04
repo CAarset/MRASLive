@@ -2,7 +2,7 @@
 
 import numpy as np
 from numpy.polynomial import chebyshev as _cheb
-from ngsolve import BilinearForm, GridFunction, dx
+from ngsolve import H1, BilinearForm, GridFunction, dx
 
 
 def seeded_rng(seed, *tags):
@@ -153,6 +153,17 @@ class GaussianFEMNoise:
 
     # -- sampling ---------------------------------------------------------------
 
+    # Draws are keyed by (seed, noise level, counter): nothing to seed or
+    # carry across a restart.
+    def start(self):
+        pass
+
+    def rng_state(self):
+        return None
+
+    def set_rng_state(self, state):
+        pass
+
     def _mass_norm(self, v):
         w = np.array(self._mm.matvec(v))
         return float(np.sqrt(max(v[self.idx] @ w[self.idx], 0.0)))
@@ -185,6 +196,105 @@ class GaussianFEMNoise:
         t /= self.gamma
         e = self._dis2 * (t - b2 + self.coef[0] * eta)
 
+        norm_e = self._mass_norm(e)
+        if norm_e > 0.0:
+            e *= noise_level * self._mass_norm(gfv) / norm_e
+        z.vec.FV().NumPy()[:] = gfv + e
+        return z
+
+
+NOISE_LENGTH = 0.05  # Matern correlation length: this fraction of the diagonal
+
+
+class MaternFEMNoise:
+    r"""Gaussian noise with a Matern covariance in space, of exact relative L2
+    amplitude: the datum ``z = gf + e``, ``||e||_L2 = noise_level ||gf||_L2``,
+    as :class:`GaussianFEMNoise` and the paper scale it (its Section 4).
+
+    The field is ngsrng's Matern Gaussian on U_h (Lindgren-Rue SPDE, ``nu``
+    the smoothness, ``length`` the correlation length, by default
+    ``NOISE_LENGTH`` of the domain's diagonal; Robin boundary treatment, so
+    the variance is about constant up to the boundary), drawn by ngsrng
+    directly, zero on the Dirichlet-constrained dofs; a vector space takes
+    one independent field per component, all in one draw.  The draws follow
+    torch's global random state, as ngsrng's do: :meth:`start` seeds it
+    with ``seed`` (a run calls it before its first datum), and
+    :meth:`rng_state` / :meth:`set_rng_state` carry it across a restart.
+
+    The MRAS theory assumes nothing of the noise but its size (a bound in
+    L^p(0, infinity; Z), Kaltenbacher-Nguyen 2021 Section 2.2): smoother
+    noise only makes the smoothing error smaller.
+    """
+
+    def __init__(self, fes, seed=0, length=None, nu=1.0):
+        import ngsrng
+        import torch
+        self._torch = torch
+        self.fes = fes
+        self.seed = int(seed)
+        mesh = fes.mesh
+        points = np.array([v.point for v in mesh.vertices])
+        diagonal = float(np.linalg.norm(points.max(axis=0)
+                                        - points.min(axis=0)))
+        self.length = float(length) if length else NOISE_LENGTH * diagonal
+        self.nu = float(nu)
+        self.dim = GridFunction(fes).dim
+        scalar = fes if self.dim == 1 else H1(
+            mesh, order=fes.globalorder, dirichlet=self._dirichlet(fes))
+        self._n = scalar.ndof
+        rng = ngsrng.default_rng(
+            scalar, dtype=torch.float64,
+            correlation=ngsrng.matern_correlation(self.length, nu=self.nu,
+                                                  boundary="robin"))
+        self._gaussian = rng.gaussian()
+        u, v = fes.TnT()
+        mass = BilinearForm(fes)
+        mass += u * v * dx
+        mass.Assemble()
+        self._mm = mass.mat
+
+    @staticmethod
+    def _dirichlet(fes):
+        """The boundaries whose dofs ``fes`` constrains, as a regex."""
+        mesh = fes.mesh
+        free = np.fromiter(fes.FreeDofs(), dtype=bool)
+        names = []
+        for name in sorted(set(mesh.GetBoundaries())):
+            dofs = np.array(fes.GetDofs(mesh.Boundaries(name)), dtype=bool)
+            if dofs.any() and not (dofs & free).any():
+                names.append(name)
+        return "|".join(names) if names else None
+
+    def start(self):
+        """Seed the draws of a run (torch's global generator)."""
+        self._torch.manual_seed(self.seed)
+
+    def rng_state(self):
+        return self._torch.get_rng_state().numpy().copy()
+
+    def set_rng_state(self, state):
+        self._torch.set_rng_state(self._torch.from_numpy(
+            np.asarray(state, dtype=np.uint8)))
+
+    def _mass_norm(self, v):
+        w = np.array(self._mm.matvec(v))
+        return float(np.sqrt(max(v @ w, 0.0)))
+
+    def draw(self, gf, noise_level, counter=None):
+        """Return a fresh GridFunction ``z = gf + e`` whose noise ``e`` has
+        relative L2 norm ``noise_level`` (the next draw of the stream;
+        ``counter`` is not used)."""
+        if noise_level < 0:
+            raise ValueError(f"noise level must be non-negative, got {noise_level}")
+        z = GridFunction(self.fes)
+        gfv = np.array(gf.vec.FV().NumPy())
+        if noise_level == 0:
+            z.vec.FV().NumPy()[:] = gfv
+            return z
+        e = np.empty(self.fes.ndof)
+        # one sample per component, written in place: component k holds
+        # dofs k n ... (k + 1) n - 1 of a vector space
+        self._gaussian.sample_into(e.reshape(self.dim, self._n))
         norm_e = self._mass_norm(e)
         if norm_e > 0.0:
             e *= noise_level * self._mass_norm(gfv) / norm_e

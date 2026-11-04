@@ -1,14 +1,18 @@
 """Adjoint-pairing verification for the coupled MRAS step forms.
 
-The joint step assembled by ``Problem.forms`` splits into a state row
+The joint step assembled by ``MRASProblem.forms`` splits into a state row
 (tested by ``v``) and a parameter row (tested by ``s``).  The state row
-couples to the parameter trial through the bilinear form, while the
-parameter row sees the state trial through the lagged iterate
-``state.gfu`` in the residual, so the linear step operator on joint
-increments reads
+couples to the parameter trial through the bilinear form.  The parameter
+row sees the state through the tracking term f_q^*(u - z): in the
+semi-implicit and explicit schemes at the lagged iterate ``state.gfu``, in
+the residual, and in the implicit scheme at the new state, in the matrix,
+where it stands on the left with the opposite sign.  The linear step
+operator on joint increments, with the tracking term read as a right-hand
+side either way, is
 
     A = [[M_uu, K    ],        K x_q = [M x]_state  for x = (0, x_q),
-         [N,    M_qq ]]        N y_u = [res(gfu <- y_u) - res(gfu <- 0)]_param.
+         [N,    M_qq ]]        N y_u = [res(gfu <- y_u) - res(gfu <- 0)]_param
+                                       - [M y]_param  for y = (y_u, 0).
 
 Symmetry of A in the coefficient pairing ``<A x, y> = x . (A y)`` is the
 discrete signature of the adjoint identity behind Assumption 2.2: the
@@ -36,9 +40,11 @@ import numpy as np
 from ngsolve import GridFunction
 
 
-def _ratio(t1, t2):
-    denom = abs(t1) + abs(t2)
-    return abs(t1 - t2) / denom if denom > 1e-30 else 0.0
+def _ratio(t1, t2, scale):
+    """The mismatch of a pairing against its Cauchy-Schwarz scale, the size
+    round-off is measured on: a random pairing can cancel to a small sum of
+    large terms, and |t1| + |t2| would then count the cancellation."""
+    return abs(t1 - t2) / scale if scale > 1e-30 else 0.0
 
 
 def _residual(problem, state):
@@ -57,6 +63,11 @@ def _probe(problem, state, draws, seed):
     def apply(x):
         carrier.vec.data = x
         out = np.asarray(M.matvec(carrier.vec)).copy()
+        # An implicit tracking block sits in the matrix as -N: flip it.
+        state_part = np.array(x)
+        state_part[nu:] = 0.0
+        carrier.vec.data = state_part
+        out[nu:] -= 2 * np.asarray(M.matvec(carrier.vec))[nu:]
         base = np.array(state.gfu.vec.FV().NumPy())
         state.gfu.vec.data = x[:nu]
         hit = _residual(problem, state)[nu:]
@@ -69,19 +80,23 @@ def _probe(problem, state, draws, seed):
     rng = np.random.default_rng(seed)
     full_ratios, full_activity = [], 0.0
     cross_ratios, cross_activity = [], 0.0
+    norm = np.linalg.norm
     for _ in range(draws):
         x = rng.standard_normal(M.shape[1])
         y = rng.standard_normal(M.shape[1])
-        t1, t2 = np.dot(y, apply(x)), np.dot(x, apply(y))
-        full_ratios.append(_ratio(t1, t2))
-        full_activity = max(full_activity, abs(t1) + abs(t2))
+        ax, ay = apply(x), apply(y)
+        scale = norm(y) * norm(ax) + norm(x) * norm(ay)
+        full_ratios.append(_ratio(np.dot(y, ax), np.dot(x, ay), scale))
+        full_activity = max(full_activity, scale)
         # Block-separated pairs: only K and N can contribute.
         x_q, y_u = np.zeros(M.shape[1]), np.zeros(M.shape[1])
         x_q[nu:] = rng.standard_normal(M.shape[1] - nu)
         y_u[:nu] = rng.standard_normal(nu)
-        t1, t2 = np.dot(y_u, apply(x_q)), np.dot(x_q, apply(y_u))
-        cross_ratios.append(_ratio(t1, t2))
-        cross_activity = max(cross_activity, abs(t1) + abs(t2))
+        k_x, n_y = apply(x_q)[:nu], apply(y_u)[nu:]  # K x_q and N y_u
+        scale = norm(y_u) * norm(k_x) + norm(x_q) * norm(n_y)
+        cross_ratios.append(_ratio(np.dot(y_u[:nu], k_x),
+                                   np.dot(x_q[nu:], n_y), scale))
+        cross_activity = max(cross_activity, scale)
     return {
         "max_ratio": max(cross_ratios),
         "max_ratio_full": max(full_ratios),

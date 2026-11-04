@@ -12,9 +12,12 @@ __pycache__/
 
 # Paper PDF (22 MB) is published via DOI; keep the XML citation only.
 MRAS_Paper.pdf
+# Local copies of the theory sources (arXiv links in docs/THEORY_KN21.md).
+docs/references/*.pdf
 
 # Simulation output
 results/
+archive/
 data/
 campaign_state/
 *.egg-info/

@@ -5,38 +5,53 @@ silent skip.
 
 The expected verdicts are the audit results of the paper's examples:
 
-* sigma = 0 family (Darcy, Fisher, Burgers pipe): adjoint pairing at
+* sigma = 0 family (Darcy, Fisher, Burgers 1D): adjoint pairing at
   machine precision, f affine in q, (A2) FAILS as a claim (gradient
-  coupling: degenerate on P0, sign-indefinite relaxation; the paper does
-  not claim it, Remark 4.2), (A3) therefore unverifiable;
-* Burgers pipe additionally: reconstruction does not descend at the
-  quick-check horizon (t = 0.5) -- the banded wake field is felt on the
-  forcing timescale of several time units, the plateau the live notebook
-  documents (persistent-excitation caveat, DEVIATIONS.md);
+  coupling: degenerate on P0, sign-indefinite relaxation; on the P1 Q_h
+  of Burgers 1D the exact pairing is indefinite; the paper does not claim
+  it, Remark 4.2); L = 0, so (A3) is C's coercivity alone, M~ = M = 1;
+* Burgers 2D (vector) shares that family; the vector state is probed
+  along each velocity component; its inflow descends from the start
+  (0.44 -> 0.34 by its audit horizon t = 1, from qhat_0 = 3/4), and the
+  Burgers 1D beams descend (1 -> 0.81 by t = 1);
+* persistent excitation over the audit horizon: positive for Darcy,
+  Fisher, the Arrhenius pair, potential and Allen-Cahn; zero to the
+  accuracy of the solve for both Burgers examples, whose data up to t = 1
+  have not reached the top corner of the inlet (1D, beyond the beams) and
+  the outlet (2D, before the inflow arrives);
+* convergence (what the declared sigma gives): sigma = 0 with f affine in
+  q converges through the persistent excitation, so the PE verdict
+  carries over (ok for Darcy, Fisher and Arrhenius, fail for both Burgers
+  over t <= 1); sigma = 1 (potential, Allen-Cahn) has the decay estimate
+  only up to the unconfirmed (A1) and (A3): unverifiable;
 * Arrhenius pair: every rung confirmed -- the reference implementation of
-  the abstract scheme;
-* potential / allen_cahn: paper-literal rows -> adjoint DEVIATION; f
-  nonlinear in q, so the (A1) remainder is ESTIMATED numerically (the
-  declaration-free path: the checklist warns instead of trusting); both
-  uniformly monotone on their actual datum range (positive a.e. datum:
-  the AC nodal undershoot at sine extrema is a P3 interpolation artifact,
-  cell means stay >= 1 - |u_wot| > 0); C norm-dependent -> (A3)
-  unverifiable;
-* helmholtz: parameter absent from the truth model: the ladder is waived
-  (theory_exempt) and the self-step is a documented deviation.
+  the abstract scheme; its sigma = 1 twin too, with the decay estimate as
+  its convergence statement and its strong form verified against the
+  weak one;
+* potential / allen_cahn: adjoint pairing at machine precision (the
+  scheme is built from the declared pair); f nonlinear in q, so the (A1)
+  remainder is ESTIMATED numerically (the declaration-free path: the
+  checklist warns instead of trusting); (A2) confirmed by the declared
+  bounds c_coe() = ess inf u^dagger (potential) and (ess inf u^dagger)^3
+  (Allen-Cahn), which the sampled pairings exceed; the state prescribed
+  on the boundary, C = c(||q||) (-Laplace) is coercive for every c > 0,
+  but the bound c >= L^2/(2 C_coe) + M needs L(||q||): (A3) unverifiable.
 """
 
 import re
+from types import SimpleNamespace
 
 import pytest
-from ngsolve import BilinearForm, LinearForm, dx, grad
+from ngsolve import IfPos, Integrate, x, y
 
 from mras.domains import darcy
 from mras.live import load_example
-from mras.scheme import Problem, TheorySpecError
-from mras.verify import (DEVIATION, ESTIMATED, FAIL, OK, UNVERIFIABLE,
-                         _datum_array, _datum_cells_mean, check_example,
-                         run_checks)
+from mras.scheme import MRASProblem, TheorySpecError
+from mras.verify import (ESTIMATED, FAIL, OK, UNVERIFIABLE, Check,
+                         _datum_array, _datum_cells_mean, _datum_samples,
+                         _strong_gap,
+                         check_a2, check_convergence_route, check_example,
+                         check_pe_after, persistent_excitation, run_checks)
 
 # The examples live in examples/ and are loaded by the runner, not imported.
 AllenCahnProblem = load_example("allen_cahn").PROBLEM
@@ -45,39 +60,49 @@ _ArrheniusBase = load_example("arrhenius")._ArrheniusBase
 
 EXPECTED = {
     "darcy": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
-              "(A2)": FAIL, "(A3)": UNVERIFIABLE, "persistent": OK,
-              "reconstruction": OK, "seeded": OK},
+              "(A2)": FAIL, "(A3)": OK, "persistent": OK, "Gramian": OK,
+              "convergence": OK, "reconstruction": OK, "seeded": OK},
     "fisher": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
-               "(A2)": FAIL, "(A3)": UNVERIFIABLE, "persistent": OK,
-               "reconstruction": OK, "seeded": OK},
-    "burgers_pipe": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
-                     "(A2)": FAIL, "(A3)": UNVERIFIABLE, "persistent": OK,
-                     "reconstruction": FAIL, "seeded": OK},
+               "(A2)": FAIL, "(A3)": OK, "persistent": OK, "Gramian": OK,
+               "convergence": OK, "reconstruction": OK, "seeded": OK},
+    "burgers_1d": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
+                   "(A2)": FAIL, "(A3)": OK, "persistent": FAIL, "Gramian": FAIL,
+                   "convergence": FAIL, "reconstruction": OK, "seeded": OK},
     "arrhenius": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
-                  "(A2)": OK, "(A3)": OK, "persistent": OK,
-                  "reconstruction": OK, "seeded": OK},
-    "arrhenius_linear": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
-                         "(A2)": OK, "(A3)": OK, "persistent": OK,
+                  "(A2)": OK, "(A3)": OK, "persistent": OK, "Gramian": OK,
+                  "convergence": OK, "reconstruction": OK, "seeded": OK},
+    "arrhenius_linear": {"adjoint": OK, "coupling pre-verif": OK,
+                         "(A1)": OK, "(A2)": OK, "(A3)": OK,
+                         "persistent": OK, "Gramian": OK, "convergence": OK,
                          "reconstruction": OK, "seeded": OK},
-    "potential": {"adjoint": DEVIATION, "coupling pre-verif": OK,
+    "arrhenius_sigma1": {"adjoint": OK, "coupling pre-verif": OK,
+                         "(A1)": OK, "(A2)": OK, "(A3)": OK,
+                         "persistent": OK, "Gramian": OK, "convergence": OK,
+                         "reconstruction": OK, "seeded": OK},
+    "potential": {"adjoint": OK, "coupling pre-verif": OK,
                   "(A1)": ESTIMATED, "(A2)": OK, "(A3)": UNVERIFIABLE,
-                  "persistent": OK, "reconstruction": OK, "seeded": OK},
-    "allen_cahn": {"adjoint": DEVIATION, "coupling pre-verif": OK,
+                  "persistent": OK, "Gramian": OK, "convergence": UNVERIFIABLE,
+                  "reconstruction": OK, "seeded": OK},
+    "allen_cahn": {"adjoint": OK, "coupling pre-verif": OK,
                    "(A1)": ESTIMATED, "(A2)": OK, "(A3)": UNVERIFIABLE,
-                   "persistent": OK, "reconstruction": OK, "seeded": OK},
-    "helmholtz": {"adjoint": DEVIATION, "coupling pre-verif": UNVERIFIABLE,
-                  "(A1)": UNVERIFIABLE, "(A2)": UNVERIFIABLE,
-                  "(A3)": UNVERIFIABLE, "persistent": OK,
-                  "reconstruction": UNVERIFIABLE, "seeded": OK},
+                   "persistent": OK, "Gramian": OK, "convergence": UNVERIFIABLE,
+                   "reconstruction": OK, "seeded": OK},
+    "burgers_2d": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
+                   "(A2)": FAIL, "(A3)": OK, "persistent": FAIL, "Gramian": FAIL,
+                   "convergence": FAIL, "reconstruction": OK, "seeded": OK},
 }
 
 
 def _by_prefix(checks):
+    """Each row under its key; "Gramian" before "persistent", which both
+    PE rows contain."""
+    keys = sorted(EXPECTED["darcy"], key=lambda k: k != "Gramian")
     out = {}
     for c in checks:
-        for key in EXPECTED["darcy"]:
-            if c.name.startswith(key) or key in c.name:
-                out[key] = c.status
+        key = next((k for k in keys if c.name.startswith(k) or k in c.name),
+                   None)
+        if key is not None:
+            out[key] = c.status
     return out
 
 
@@ -119,10 +144,6 @@ class QuadraticRateProblem(_ArrheniusBase):
     def r(w):
         return 1 + w + w * w
 
-    @staticmethod
-    def rprime(w):
-        return 1 + 2 * w
-
     def c_coe(self):
         lo, hi = self.essinf_datum(), self.data_range()[1]
         cands = [self.r(lo), self.r(hi)]
@@ -131,22 +152,9 @@ class QuadraticRateProblem(_ArrheniusBase):
         return float(min(cands))
 
 
-class BareQuadraticProblem(QuadraticRateProblem):
-    """Same physics, no theory hooks declared and one honest waiver: the
-    degradation contract -- every check still fires, and the rungs that
-    need declared structure report UNVERIFIABLE instead of passing
-    silently.  The adjoint probe must still pass: it probes the ASSEMBLED
-    forms, requiring no declaration at all."""
-
-    coupling = None
-    coupling_adjoint = None
-    c_coe = None
-    C_scale = None
-    theory_exempt = "degradation probe"
-
-
 def _run_quadratic(cls):
-    p = cls(h=0.4, dt=0.05, tend=1.5, data_h=0.2)
+    # h = 0.5 keeps Q_h within the dense PE eigenproblem
+    p = cls(h=0.5, dt=0.05, tend=1.5)
     res = p.run_level(0, progress=False)
     checks = run_checks(p, res.state, res.error_q)
     keys = ("adjoint", "coupling pre-verif", "(A1)", "(A2)", "(A3)",
@@ -171,18 +179,6 @@ def test_new_example_with_hooks_gets_the_full_ladder_automatically():
     assert "machine precision" in got["adjoint"].detail
 
 
-def test_new_example_without_hooks_degrades_to_flagged_unverifiable():
-    got = _run_quadratic(BareQuadraticProblem)
-    expected = {"adjoint": OK,                 # numeric probe of the forms
-                "coupling pre-verif": UNVERIFIABLE,  # ladder waived
-                "(A1)": UNVERIFIABLE,          # no f-hook to classify
-                "(A2)": UNVERIFIABLE,          # no structure to probe
-                "(A3)": UNVERIFIABLE,          # no C_scale, no C_coe
-                "persistent": OK, "reconstruction": OK}
-    got_status = {k: c.status for k, c in got.items()}
-    assert got_status == expected, {k: c.detail for k, c in got.items()}
-
-
 class SquaredQProblem(QuadraticRateProblem):
     """A nonlinear-in-q specimen of the SAME coupling hook: f(q, z) =
     q^2 r(z).  Nothing informs the checklist of the q^2 except the hook
@@ -192,13 +188,17 @@ class SquaredQProblem(QuadraticRateProblem):
     pairing q^2 -> 2 q^3-like cubic form is sign-indefinite over random
     patch pairs, so (A2) must FAIL as a claim; and the coupling
     pre-verification must confirm the independently transcribed adjoint
-    2 q r(z) before any solving.  The solver rows exist only to make the
-    run possible; the assertions concern the pre-solve ladder."""
+    2 q r(z) before any solving.  The step itself is the driver's, built
+    from the same two hooks."""
 
     name = "squared_q"
     sigma = 1.0     # f nonlinear in q: the sigma Dt z residual is active
     L = None        # no declaration: force the estimation path
     c_coe = None    # the r-based witness would be a lie for q^2
+    # On this coarse mesh the elementwise Laplacian of the datum is 60 %
+    # off (the strong-form check rightly fails it); this ladder is about
+    # (A1) and (A2), so the problem keeps the weak sigma-bracket.
+    model_strong = None
 
     def initial_guess(self):
         return 0.3  # a q^2 flow starting at 0 has zero drive
@@ -209,27 +209,9 @@ class SquaredQProblem(QuadraticRateProblem):
     def coupling_adjoint(self, q, z, s):
         return 2 * q * self.r(z) * s
 
-    def forms(self, state):
-        dt = self.dt
-        z, z_old, gfu, gfq = state.z, state.z_old, state.gfu, state.gfq
-        a = BilinearForm(self.X)
-        res = LinearForm(self.X)
-        # state row, linearised at the lagged estimate: q^2 -> 2 gfq q - gfq^2
-        a += self.u * self.v * dx
-        a += dt * grad(self.u) * grad(self.v) * dx
-        a += 2 * dt * gfq * self.r(z) * self.q * self.v * dx
-        res += gfu * self.v * dx
-        res += dt * state.g * self.v * dx
-        res += dt * gfq * gfq * self.r(z) * self.v * dx
-        # parameter row: Dt q = f_q(q~(gfq), z)^* (u - z) = 2 gfq r(z) (u - z)
-        a += self.q * self.s * dx
-        res += gfq * self.s * dx
-        res += 2 * dt * gfq * self.r(z_old) * (gfu - z_old) * self.s * dx
-        return a, res
-
 
 def test_nonlinear_q_ladder_estimates_and_refuses_to_promote():
-    p = SquaredQProblem(h=1.2, dt=0.05, tend=1.5, data_h=0.7)
+    p = SquaredQProblem(h=1.2, dt=0.05, tend=1.5, k_q=0)
     res = p.run_level(0, progress=False)
     with pytest.warns(UserWarning, match="estimated numerically"):
         checks = run_checks(p, res.state, res.error_q)
@@ -248,10 +230,120 @@ def test_nonlinear_q_ladder_estimates_and_refuses_to_promote():
     assert a2.status == FAIL and "monotonicity violated" in a2.detail, a2.detail
     pv = got["coupling pre-verification"]
     assert pv.status == OK and "q-derivative" in pv.detail, pv.detail
+    # sigma = 1 on an indefinite (A2) pairing: the energy can grow
+    route = got["convergence"]
+    assert route.status == FAIL and "indefinite" in route.detail, route.detail
+
+
+def _route(sigma, linear, a2=OK, pe=OK):
+    problem = SimpleNamespace(sigma=sigma, C_scale=None)
+    return check_convergence_route(
+        problem, linear, Check("(A1)", OK, "", 0.0),
+        Check("(A2)", a2, "", 0.75), Check("(A3)", OK, "", 1.0),
+        Check("persistent excitation", pe, "", 1e-3))
+
+
+def test_convergence_follows_the_declared_sigma():
+    """sigma is the author's choice; the verdict is what the energy
+    identity gives for it."""
+    affine0 = _route(0, True)       # through the excitation, not (A2)
+    assert affine0.status == OK and "sigma = 1 would give" in affine0.detail
+    assert _route(0, True, pe=FAIL).status == FAIL
+    affine1 = _route(1, True)       # allowed: the decay estimate
+    assert affine1.status == OK and "decay estimate holds" in affine1.detail
+    assert _route(1, True, a2=FAIL).status == FAIL
+    assert _route(1, False, a2=ESTIMATED).status == ESTIMATED
+    nonlinear0 = _route(0, False)   # nothing absorbs the remainder
+    assert nonlinear0.status == FAIL and "no estimate" in nonlinear0.detail
+
+
+class MonotoneQProblem(QuadraticRateProblem):
+    """f(q, z) = (q + q^3) r(z): nonlinear in q and monotone (slope >= 1,
+    r >= 3/4), so (A2) holds with C_coe >= 3/4.  Sampled pairs can only
+    bound C_coe from above: undeclared, the verdict is an estimate."""
+
+    name = "monotone_q"
+    sigma = 1.0
+    L = None
+    c_coe = None
+
+    def coupling(self, q, z, s):
+        return (q + q * q * q) * self.r(z) * s
+
+    def coupling_adjoint(self, q, z, s):
+        return (1 + 3 * q * q) * self.r(z) * s
+
+
+def _a2(cls, affine):
+    p = cls(h=1.2, dt=0.05, tend=1.5, k_q=0)
+    return check_a2(p, _datum_samples(p), affine)
+
+
+def test_a2_sampled_minimum_is_an_estimate_until_declared():
+    undeclared = _a2(MonotoneQProblem, affine=False)
+    assert undeclared.status == ESTIMATED, undeclared.detail
+    assert "from above only" in undeclared.detail
+
+    class Declared(MonotoneQProblem):
+        def c_coe(self):
+            return 0.75
+
+    declared = _a2(Declared, affine=False)
+    assert declared.status == OK and declared.value == 0.75, declared.detail
+
+
+def test_a2_declared_bound_above_the_exact_pairing_fails():
+    class Overclaimed(QuadraticRateProblem):
+        def c_coe(self):
+            return 2.0  # r = 1 + w + w^2 dips to 3/4
+
+    got = _a2(Overclaimed, affine=True)
+    assert got.status == FAIL and "the bound is wrong" in got.detail, \
+        got.detail
+    assert "exact on Q_h" in got.detail
+
+
+def test_pe_weakest_direction_is_where_the_data_do_not_reach():
+    """Burgers 1D: up to t = 1 the beams have not lit the top corner of
+    the inlet; the PE eigenvector sits there."""
+    p = load_example("burgers_1d").PROBLEMS["burgers_1d"](h=0.35, dt=0.05,
+                                                         tend=1.0)
+    pe = persistent_excitation(p)
+    assert pe["gamma"] <= 1e-10 * pe["top"]
+    d = pe["direction"]
+    corner = Integrate(IfPos(0.5 - x, IfPos(y - 0.8, d * d, 0), 0), p.mesh)
+    assert corner >= 0.9 * Integrate(d * d, p.mesh)
+
+
+def test_strong_form_is_checked_against_the_weak_one():
+    """model_strong (-Laplace u for the Arrhenius family) agrees with the
+    weak density on U_h's boundary-free test functions; a transcription
+    error -- here a flipped sign -- does not."""
+    # On the audit's mesh; at h = 1.2 the elementwise Laplacian of the
+    # interpolated datum is itself 60 % off, which the check rightly flags.
+    p = QuadraticRateProblem(h=0.5, dt=0.05, tend=1.5)
+    samples = _datum_samples(p)
+    assert _strong_gap(p, samples) < 0.05
+
+    class Flipped(QuadraticRateProblem):
+        def model_strong(self, u):
+            return -super().model_strong(u)
+
+    flipped = Flipped(h=0.5, dt=0.05, tend=1.5)
+    assert _strong_gap(flipped, _datum_samples(flipped)) > 1.5
+
+
+def test_pe_after_a_run_samples_the_horizon_it_took():
+    """Post hoc, at the audit discretization (CHECK, else QUICK), over the
+    run's actual horizon."""
+    got = check_pe_after("darcy", 1.0)
+    assert got.status == OK and "up to t = 1," in got.detail, got.detail
+    dark = check_pe_after("burgers_1d_dark", 0.5)  # QUICK only
+    assert dark is not None and "up to t = 0.5" in dark.detail, dark.detail
 
 
 def test_incomplete_problem_raises_naming_every_gap():
-    class Stub(Problem):
+    class Stub(MRASProblem):
         name = "stub"
 
         def __init__(self):
@@ -261,16 +353,16 @@ def test_incomplete_problem_raises_naming_every_gap():
         Stub()
     msg = str(excinfo.value)
     assert "not runnable as specified" in msg
-    assert "forms(state)" in msg
-    assert "data hook" in msg and "forward_forms" in msg
-    assert "coupling(q, z, s)" in msg
+    assert "coupling(q, u, w)" in msg and "coupling_adjoint(q, u, w)" in msg
     assert "blank_problem.py" in msg
 
 
-def test_missing_adjoint_hook_warns_once():
+def test_missing_adjoint_hook_is_refused():
+    # The scheme is built from the declared pair, so the adjoint is not
+    # optional: without it there is no parameter row.
     class HalfSpecified(DarcyProblem):
         name = "half_specified"
         coupling_adjoint = None
 
-    with pytest.warns(UserWarning, match="coupling_adjoint"):
+    with pytest.raises(TheorySpecError, match="coupling_adjoint"):
         HalfSpecified()

@@ -21,7 +21,7 @@ import pytest
 
 from mras.live import build
 
-MICRO = dict(h=0.4, dt=0.02, tend=0.4, data_h=0.3, data_order=2)
+MICRO = dict(h=0.4, dt=0.02, tend=0.4)
 RECOVERY = dict(h=0.4, dt=0.02, tend=8.0)
 
 

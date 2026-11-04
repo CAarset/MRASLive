@@ -2,9 +2,10 @@
 
 import numpy as np
 import pytest
-from ngsolve import CoefficientFunction
+from ngsolve import CoefficientFunction, GridFunction
 
-from mras.fields import l2norm, to_gridfunc, to_gridfunc0
+from mras.domains import pixel_square
+from mras.fields import l2norm, pixel_field, to_gridfunc
 
 
 def test_to_gridfunc_constant(small_darcy):
@@ -21,17 +22,16 @@ def test_to_gridfunc_subbox_extrapolates(small_darcy):
     assert l2norm(gf - CoefficientFunction(3.0), small_darcy.mesh) < 1e-12
 
 
-def test_to_gridfunc0_boundary_ramp(small_darcy):
-    # Tested on the L2 coefficient space, which is what the Darcy problem
-    # feeds it into. Elements in the plateau average the profile exactly;
-    # band elements average strictly between zero and one.
-    fes = small_darcy.Qfes
-    gf = to_gridfunc0(np.ones((8, 8)), fes, band=0.1)
-    assert gf(0.5, 0.5) == pytest.approx(1.0, abs=1e-12)
-    assert 0.0 < gf(0.05, 0.5) < 1.0
-    assert 0.0 < gf(0.98, 0.5) < 1.0
-    assert 0.0 < gf(0.5, 0.05) < 1.0
-    assert 0.0 < gf(0.05, 0.05) < 1.0
+def test_pixel_constant_field_lies_in_p0_of_an_aligned_grid():
+    # A field constant on the pixels, on a grid of the pixels halved: every
+    # element lies in one pixel, so the P0 projection is the field itself.
+    values = np.random.default_rng(0).random((8, 8))
+    domains = pixel_square(16, order_u=1, order_q=0)
+    field = pixel_field(values, linear=False)
+    gf = GridFunction(domains.Qfes)
+    gf.Set(field)
+    assert l2norm(gf - field, domains.mesh) < 1e-12
+    assert gf(0.3, 0.7) == pytest.approx(values[5, 2])  # rows run along y
 
 
 def test_l2norm_matches_area_scaling(small_darcy):

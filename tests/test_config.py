@@ -19,8 +19,8 @@ def test_everything_unset_by_default():
 
 
 def test_unknown_keys_are_kept_for_the_constructor():
-    cfg = RunConfig(data_h=0.05, tsteps=7)
-    assert cfg.data_h == 0.05 and cfg.tsteps == 7
+    cfg = RunConfig(q_h=0.05, tsteps=7)
+    assert cfg.q_h == 0.05 and cfg.tsteps == 7
 
 
 def test_validation_rejects_bad_values():
@@ -80,20 +80,20 @@ def test_build_forwards_only_set_fields_and_extras():
         def __init__(self, **kwargs):
             seen.update(kwargs)
 
-    cfg = RunConfig(h=0.1, dt=0.01, tend=1.0, data_h=0.05,
+    cfg = RunConfig(h=0.1, dt=0.01, tend=1.0, q_h=0.05,
                     noise_levels=[0.05], out="here")
     prob = build(Dummy, cfg, extra_flag=True)
     # seed/k_u unset: not passed; orchestration fields consumed by the driver.
-    assert seen == {"h": 0.1, "dt": 0.01, "tend": 1.0, "data_h": 0.05,
+    assert seen == {"h": 0.1, "dt": 0.01, "tend": 1.0, "q_h": 0.05,
                     "extra_flag": True}
     assert prob is not None
 
 
-def test_counters_from_times():
+def test_steps_from_times():
     cfg = RunConfig(dt=0.01, times=[0.0, 0.5, 2.0])
-    assert cfg.counters() == [1, 51, 201]
+    assert cfg.steps() == [0, 50, 200]
 
 
-def test_counters_need_dt():
+def test_steps_need_dt():
     with pytest.raises(ValueError, match="needs dt"):
-        RunConfig(times=[0.5]).counters()
+        RunConfig(times=[0.5]).steps()

@@ -1,5 +1,5 @@
-# Burgers pipe sweep for examples/burgers_pipe.py:
-#   .venv/bin/python -m mras.live burgers_pipe --config configs/burgers.yaml
+# Burgers pipe sweep for examples/burgers_1d.py:
+#   .venv/bin/python -m mras.live burgers_1d --config configs/burgers.yaml
 defaults:
   dt: 0.01
   tend: 10.0
@@ -8,5 +8,5 @@ defaults:
   times: [2.0, 5.0]
 
 runs:
-  - {h: 0.15,  seed: 0, out: results/burgers_pipe_h15}
-  - {h: 0.075, seed: 0, out: results/burgers_pipe_h075}
+  - {h: 0.15,  seed: 0, out: results/cli/burgers_1d_h15}
+  - {h: 0.075, seed: 0, out: results/cli/burgers_1d_h075}

@@ -18,12 +18,11 @@ grep -rn "CLEANUP-FLAG" --include="*.py" .   # everything flagged
 | `scripts/darcy_reproduce.py` | same, Darcy/PDEBench (Fig 4, Table 6) | same |
 | `scripts/asymptotics_arrhenius.py` | long-horizon decay study of the Arrhenius error | one-off analysis; its answer lives in the paper text now |
 | `scripts/darcy_dataset.py` | synthetic Darcy fields of matched contrast vs PDEBench | data-provenance exploration; conclusion recorded in `docs/DEVIATIONS.md` |
-| `examples/helmholtz_in_parameter.py` | Helmholtz "identifies nothing" placeholder | superseded by the scalar-q rework of `docs/ASSUMPTIONS.md` section 6 |
 
 Not flagged (user path or the paper-figure toolchain that consumes stored
 `results/` artefacts): `mras/` incl. `stepper.py` and `data/`, the
-`examples/` problem files (`darcy.py` … `helmholtz` excepted) plus
-`examples/blank_problem.py` and `examples/darcy_decaying.py`,
+`examples/` problem files plus
+`examples/blank_problem.py`,
 `scripts/checklist.py`, `scripts/demo_arrhenius.py`,
 `scripts/make_figures.py`, `mras_live.ipynb`, `configs/`, `tests/`.
 
@@ -32,11 +31,7 @@ Not flagged (user path or the paper-figure toolchain that consumes stored
 Deleting the flagged files is not self-contained; the push-cleanup commit
 must also
 
-1. drop the `"helmholtz"` row of `EXPECTED` in `tests/test_verify.py` and
-   the Helmholtz case in `tests/test_adjoint.py`; the catalog and the
-   checklist registry pick the example up from its file, so deleting
-   `examples/helmholtz_in_parameter.py` removes it from both;
-2. drop the "Reproduce the paper's figures" table from `README.md` (it
+1. drop the "Reproduce the paper's figures" table from `README.md` (it
    routes through the two reproduce scripts) — or keep the scripts until
    the paper revision ships, which is the current intent;
-3. rerun `.venv/bin/python -m pytest tests/ -q`.
+2. rerun `.venv/bin/python -m pytest tests/ -q`.

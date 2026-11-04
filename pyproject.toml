@@ -11,19 +11,20 @@ license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "ngsolve>=6.2",
-    "ngsplot",  # pictures; unpublished on PyPI -- resolve it from the local
-                # checkout below, or `pip install -e ../ngsplot`
+    # The author's own packages, from GitHub and unpinned (the latest commit
+    # of the default branch): pictures, and random fields for data noise.
+    # Update with `pip install -U --force-reinstall --no-deps ngsplot ngsrng`
+    # (from these URLs); develop one locally with `pip install -e ../ngsplot`.
+    "ngsplot @ git+https://github.com/CAarset/ngsplot.git",
+    "ngsrng @ git+https://github.com/CAarset/ngsrng.git",
     "numpy",
     "matplotlib",
     "pydantic>=2",
     "PyYAML",
+    "h5py",  # run checkpoints (mras.checkpoint) and the PDEBench Darcy data
 ]
 
-[tool.uv.sources]
-ngsplot = { path = "../ngsplot", editable = true }
-
 [project.optional-dependencies]
-pdebench = ["h5py"]
 notebook = ["anywidget"]
 dev = ["pytest"]
 
