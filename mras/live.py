@@ -896,8 +896,8 @@ def run_live(example, noise_level=0.0, live=False, dt=None, tend=None,
     ``MRASProblem``); ``noise_level`` is the relative L2 noise of the data
     (``0.05`` = a noise level of 5 %); ``dt`` and ``tend`` are the step
     size and the time limit of the assimilation, which stops earlier once
-    the reconstruction error reaches ``target`` (max(1 %, 1.25 times the
-    floor) unless given; 0 runs to ``tend``); ``q0`` is the initial
+    the reconstruction error reaches ``target`` (1.25 times the floor
+    unless given; 0 runs to ``tend``); ``q0`` is the initial
     estimate qhat_0 (a number, coefficient or grid function), the
     example's own unless given (0 for most).  Data are generated in
     lockstep with the estimator, so with ``live=True`` the view opens at

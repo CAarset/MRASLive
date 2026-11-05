@@ -316,10 +316,12 @@ extensible design, so its numbers are its own.
 - A run stops once its reconstruction error has come down to its target
   (2026-10-29), at the latest at `tend` -- the time limit, 100 for most
   examples (the potential and Allen-Cahn: their decay times, 6 and 10).
-  The target is max(1 %, 1.25 times the floor) unless set
+  The target is 1.25 times the floor unless set
   (`problem.target`, `run_live(target=...)`, `--target`; 0 runs to
   `tend`): the floor itself is no target, as no estimate in `Q_h` gets
-  below it.  The rule reads the true parameter, which only benchmarks
+  below it.  Until 2026-11-04 it was max(1 %, 1.25 times the floor),
+  which stopped the noise-free 1D Burgers run at 1 % on its way down to
+  its 0.069 % floor.  The rule reads the true parameter, which only benchmarks
   have; with noise a discrepancy principle is to replace it (not
   implemented).  Runs record how they ended (`meta["stopped"]`,
   `"target"` or `"tend"`, and `meta["t_end"]`); the checklist audits at a
@@ -926,7 +928,8 @@ with the noise's `L^p(0, t)` norm, so persistent noise needs a stop.
   straight up the channel, tapering to half its centre at the (slip)
   walls, its amplitude rising from rest by a smoothstep over `RAMP = 5`
   and then held, so that the flow settles to a steady state; no transverse
-  or skewing motion.  With steady data Baumeister's PE asks that
+  or skewing motion (a slow sway came back on 2026-11-05, below).  With
+  steady data Baumeister's PE asks that
   `h -> div(h grad z_inf)` be injective on Q_h: q is identified where the
   steady flow shears, which the taper provides on the centreline.
   Until then the inflow added a mode skewing it toward either wall and a
@@ -967,6 +970,35 @@ with the noise's `L^p(0, t)` norm, so persistent noise needs a stop.
   stays for the user's design -- a flow spread evenly through the
   channel, with layers the mesh resolves -- where `S = 5` runs on as a
   jet with a less sheared core; `S = 5` would also do.
+- A slow sway and a stronger inflow (2026-11-05, the user's call).  The
+  static production run (`h = 0.05`, `U_MEAN = 10`) crept from 0.104 at
+  t = 20 to 0.0935 at t = 100 against its 5.6 % floor, and too little of
+  the flow reached the outlet.  The inflow now sways slowly from side to
+  side: a transverse part `SWAY sin(2 pi t / SWAY_PERIOD) (1 - xi^2)
+  U_MEAN`, peak `SWAY = 0.25` of the centre speed mid-channel and zero at
+  the slip walls, period 50 against a settling time under 10, so the flow
+  passes through near-steady states.  `U_MEAN` went 10 -> 20 (`S U = 20`).
+  Noise-free, `h = 0.15` (best fit 9.7 %), `dt = 0.05`, to t = 50;
+  "outflow" is the datum's flux through the outlet over the inlet's:
+
+  | inflow | `error_q` at t = 10 / 20 / 30 / 40 / 50 | minimum | outflow | effective noise |
+  |---|---|---|---|---|
+  | static, `U = 10` | 0.1349 / 0.1281 / 0.1253 / 0.1238 / 0.1228 | 0.1228 (t = 50) | 45 % | 2.9 % |
+  | sway, `U = 10` | 0.1324 / 0.1251 / 0.1222 / 0.1248 / 0.1199 | 0.1199 (t = 50) | 41 - 46 % | 2.7 - 3.3 % |
+  | sway, `U = 15` | 0.1212 / 0.1176 / 0.1215 / 0.1249 / 0.1204 | 0.1176 (t = 20) | 48 - 54 % | 2.6 - 3.2 % |
+  | **sway, `U = 20` (shipped)** | 0.1178 / 0.1150 / 0.1215 / 0.1243 / 0.1209 | 0.1150 (t = 20) | 52 - 58 % | 2.5 - 3.1 % |
+  | sway, `U = 10`, `S = 2` | 0.1226 at t = 10, then stopped | | 56 % | 2.9 % |
+
+  The flow's shape depends on `S U` alone (`U = 20` and `S = 2` give one
+  outflow to three digits), but the parameter law scales with the datum
+  squared, so the faster inflow also moves the estimate faster: hence `U`,
+  not `S`.  The sway ends every run below the static one by t = 50, and
+  moves the error with it: as the flow leans left across the star and the
+  diamond (t = 25 - 50), the effective noise -- the part of `q_true`
+  outside `Q_h`, which the flow sees through its shear -- rises to 3.1 -
+  3.3 % and the error peaks near t = 40 at about 0.125.  The best fit in
+  `Q_h` that the data allow moves with the flow; the static flow
+  approaches its single one monotonically.
 - Inflow strength (history, with the modulated inflow and `S = 5`;
   2026-10-29; noise-free, `dt = 0.05`, to `t = 10`;
   reach = first time the datum at the outlet's centre exceeds 10 % of the

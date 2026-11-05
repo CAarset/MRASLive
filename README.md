@@ -135,7 +135,7 @@ holds the plumbing.  From the command line, `scripts/run_examples.py` runs
 every example (or those named) the same way:
 
 ```bash
-# every run stops at its target error -- max(1 %, 1.25 x the floor),
+# every run stops at its target error -- 1.25 x the floor,
 # --target to change it, 0 to run to the limit -- or its time limit --tend
 .venv/bin/python scripts/run_examples.py                      # all, DEFAULTS
 .venv/bin/python scripts/run_examples.py burgers_1d fisher  # these two

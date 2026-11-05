@@ -96,11 +96,11 @@ def test_a_run_stops_at_its_target_error_or_its_time_limit():
     assert result.meta["t_end"] == pytest.approx(0.5)
 
 
-def test_the_default_target_is_one_percent_or_above_the_floor():
-    from mras.scheme import TARGET_FLOOR, TARGET_MIN
+def test_the_default_target_lies_just_above_the_floor():
+    from mras.scheme import TARGET_FLOOR
     problem = build("fisher", h=0.4, dt=0.05, tend=0.05)
     floor = problem.q_floor()
-    assert problem.stop_target() == max(TARGET_MIN, TARGET_FLOOR * floor)
+    assert problem.stop_target() == TARGET_FLOOR * floor
 
 
 def test_the_model_fit_lies_above_the_l2_floor_and_notices_a_stall():

@@ -3,8 +3,8 @@
 
 Each example runs at its own DEFAULTS (``--quick``: its QUICK sizes),
 noise-free unless ``--noise-levels`` says otherwise, until its
-reconstruction error reaches ``--target`` (max(1 %, 1.25 times the
-floor) unless given; 0 runs to the time limit), with ``--discrepancy
+reconstruction error reaches ``--target`` (1.25 times the floor
+unless given; 0 runs to the time limit), with ``--discrepancy
 TAU`` its residual TAU times the effective noise level (which counts the
 data's mismatch with the estimator's model too, so noise-free runs have
 one), or the time limit ``--tend`` (100 for most) is reached.  Noisy data enter smoothed, and q is projected onto its bounds
@@ -199,7 +199,7 @@ def main(argv=None):
                          "most)")
     ap.add_argument("--target", type=float,
                     help="the reconstruction error to stop at (default: "
-                         "max(1%%, 1.25 times the floor); 0 runs to --tend)")
+                         "1.25 times the floor; 0 runs to --tend)")
     ap.add_argument("--q0", type=float,
                     help="a constant initial estimate qhat_0 (default: each "
                          "example's own, 0 for most)")

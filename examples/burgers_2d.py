@@ -31,11 +31,12 @@ lane of width w, and the flow would reach about S U_MEAN w^2 / (pi^2 q)
 before dying out.  The walls are slip walls instead: no stress along them,
 and a stiff resistance ``WALL_RESISTANCE`` = beta against flow through them
 (a Robin condition), which lets through about q du_n/dn / beta.  Only the
-barriers drain the flow.  The convection is moderate, S U_MEAN = 10: Burgers
-flow steepens into layers about q / (S U) wide, here 0.05, about an element
-of the estimator's mesh, and the flow spreads across the channel; at S = 5
-the layers are five times thinner and the inflow runs on as a jet
-(docs/DEVIATIONS.md).
+barriers drain the flow.  The convection is moderate, S U_MEAN = 20: Burgers
+flow steepens into layers about q / (S U) wide, here 0.025, half an element
+of the estimator's mesh, and the flow spreads across the channel, about half
+of it reaching the outlet; at S U = 50 the inflow runs on as a jet
+(docs/DEVIATIONS.md).  The parameter law scales with the datum squared, so
+the inflow's speed sets how fast the estimate moves as well.
 
 f(q, u) = -div(q grad u) + S (u . grad) u, with the walls' resistance (a
 q-free, linear boundary term), is linear in q (sigma = 0, L = 0); the
@@ -45,16 +46,18 @@ velocity gradients, and the convection is evaluated on the datum (Remark
 Poincare holds through the Dirichlet part (inlet and barriers) and (A3) is
 as for Darcy.
 (A2) is the gradient-coupling situation of Remark 4.2: identifiability
-rests on persistent excitation, here from the inflow alone, which runs
-straight up the channel, rises smoothly from rest and then holds, so that
-the flow settles to a steady state z_inf (to |dz/dt| / |z| ~ 1e-10 by
-t = 8).  With steady data the excitation asks that h -> div(h grad z_inf)
-be injective on Q_h, so q is identified where the flow shears: the inflow
-tapers toward the walls, where a plug inflow leaves a quarter of the
-channel almost unsheared and its estimate stalls.
+rests on persistent excitation, here from the inflow alone.  It rises
+smoothly from rest, tapers toward the walls and sways slowly from side to
+side, one sine of period ``SWAY_PERIOD`` = 50 against a settling time under
+10, so that the flow passes through near-steady states.  A steady
+flow z excites h only where div(h grad z) is not small -- where it shears
+-- and a held inflow leaves the estimate stalled where its one steady
+flow does not; the sway moves the shear about the channel.
 
     .venv/bin/python -m mras.live burgers_2d --quick
 """
+
+from math import pi, sin
 
 from ngsolve import CoefficientFunction, InnerProduct, grad, x
 
@@ -63,10 +66,12 @@ from mras.domains import burgers_channel
 from mras.fields import subdomain_field
 from mras.scheme import MRASProblem
 
-U_MEAN = 10         # centreline inflow speed, once ramped up
+U_MEAN = 20         # centreline inflow speed, once ramped up
 STRENGTH = 1        # S, the strength of the convection
 RAMP = 5.0          # the inflow rises smoothly from rest over this time, then holds
 WALL_TAPER = 0.5    # the inflow at the walls, as a fraction of its centre
+SWAY = 0.25         # the transverse inflow's peak, as a fraction of U_MEAN
+SWAY_PERIOD = 50.0  # its period, slow beside the flow's settling (t < 10)
 WALL_RESISTANCE = 100.0  # beta of the slip walls, against flow through them
 NO_SLIP = "inlet|barrier"  # the Dirichlet part: the inflow, and the barriers
 Q_BACKGROUND, Q_SHAPES = 0.5, 1.0   # the true viscosity: background, shapes
@@ -81,15 +86,24 @@ def ramp(t):
     return r * r * (3 - 2 * r)
 
 
+def sway(t):
+    """The transverse inflow at time ``t`` (a number or a Parameter), as a
+    fraction of ``U_MEAN`` mid-channel: one slow sine of peak ``SWAY`` and
+    period ``SWAY_PERIOD``, rising from zero."""
+    t = t.Get() if hasattr(t, "Get") else float(t)
+    return SWAY * sin(2 * pi * t / SWAY_PERIOD)
+
+
 def inflow(t):
-    """The inflow velocity at time ``t``: straight up the channel, tapering
-    to ``WALL_TAPER`` of its centre at the (slip) walls, its amplitude
-    ramped up from rest (:func:`ramp`) and then held, so that the flow
-    settles to a steady state."""
+    """The inflow velocity at time ``t``: up the channel, tapering to
+    ``WALL_TAPER`` of its centre at the (slip) walls, and swaying slowly
+    from side to side (:func:`sway`), its transverse part zero at the walls,
+    which no flow crosses; the whole ramped up from rest (:func:`ramp`)."""
     width = domains.CHANNEL_WIDTH  # read when called: the channel may change
     xi = 2 * x / width - 1                  # -1 and 1 on the walls
     profile = 1 - (1 - WALL_TAPER) * xi ** 2  # 1 mid-channel
-    return ramp(t) * U_MEAN * CoefficientFunction((0, profile))
+    across = sway(t) * (1 - xi ** 2)          # 0 on the walls
+    return ramp(t) * U_MEAN * CoefficientFunction((across, profile))
 
 
 class Burgers2D(MRASProblem):
@@ -141,8 +155,8 @@ PROBLEM = Burgers2D
 
 # Q_h is P0, the class of the shapes.
 DEFAULTS = {"burgers_2d": dict(h=0.05, dt=0.05, tend=100.0)}
-# The audit runs to t = 3, where q has come from 0.44 to 0.35 (0.41 at
-# t = 2, still under the inflow's ramp, too close to the checklist's 10 %
-# descent to be a verdict).
+# The audit runs to t = 3, still under the inflow's ramp, where q has come
+# from 0.44 to 0.25; the flow has not reached the outlet by then, so the
+# excitation fails there.
 CHECK = {"burgers_2d": dict(h=0.35, dt=0.05, tend=3.0)}
 QUICK = CHECK

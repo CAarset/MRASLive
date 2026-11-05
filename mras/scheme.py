@@ -103,9 +103,9 @@ def _terms(value):
     return [value]
 
 
-# A run stops once error_q is at most max(TARGET_MIN, TARGET_FLOOR * floor)
+# A run stops once error_q is at most TARGET_FLOOR * floor
 # (MRASProblem.stop_target), or at tend.
-TARGET_MIN, TARGET_FLOOR = 0.01, 1.25
+TARGET_FLOOR = 1.25
 
 
 class TheorySpecError(ValueError):
@@ -155,8 +155,8 @@ class MRASProblem:
     ``u0``, ``q_true``             initial state and true parameter.
     ``tend``, ``target``           the run's time limit, and the
                                    reconstruction error at which it stops
-                                   before that: max(1 %, 1.25 times the
-                                   floor) unless set; 0 runs to ``tend``.
+                                   before that: 1.25 times the floor
+                                   unless set; 0 runs to ``tend``.
     ``q0``                         the initial estimate qhat_0 (a number,
                                    coefficient or grid function), set by
                                    whoever runs the problem; it overrides
@@ -1219,14 +1219,14 @@ class MRASProblem:
     def stop_target(self, floor=None):
         """The reconstruction error at which a run stops before ``tend``:
         ``target`` if set (0: none, the run goes to ``tend``), else
-        max(TARGET_MIN, TARGET_FLOOR times the floor).  The floor itself is
+        TARGET_FLOOR times the floor.  The floor itself is
         no target: no estimate in Q_h gets below it, so the error only
         approaches it.  The rule reads the true parameter, which only
         benchmarks have; a run without it goes to ``tend``."""
         if self.target is not None:
             return float(self.target)
         floor = self.q_floor() if floor is None else floor
-        return max(TARGET_MIN, TARGET_FLOOR * (floor or 0.0))
+        return TARGET_FLOOR * (floor or 0.0)
 
     def q_floor(self):
         """Best relative error any estimate in Q_h can reach, or None.
