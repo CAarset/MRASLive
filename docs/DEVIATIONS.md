@@ -928,7 +928,8 @@ with the noise's `L^p(0, t)` norm, so persistent noise needs a stop.
   straight up the channel, tapering to half its centre at the (slip)
   walls, its amplitude rising from rest by a smoothstep over `RAMP = 5`
   and then held, so that the flow settles to a steady state; no transverse
-  or skewing motion (a slow sway came back on 2026-11-05, below).  With
+  or skewing motion (a slow sway came back on 2026-11-05, below, and the
+  ramp went to `RAMP = 20` on 2026-11-06).  With
   steady data Baumeister's PE asks that
   `h -> div(h grad z_inf)` be injective on Q_h: q is identified where the
   steady flow shears, which the taper provides on the centreline.
@@ -999,6 +1000,129 @@ with the noise's `L^p(0, t)` norm, so persistent noise needs a stop.
   3.3 % and the error peaks near t = 40 at about 0.125.  The best fit in
   `Q_h` that the data allow moves with the flow; the static flow
   approaches its single one monotonically.
+- Noisy data (2026-11-06).  The production runs of 2026-11-05 (`U = 20`,
+  `RAMP = 5`) gave 0.071 noise-free (floor 0.056), but 3.19 at 1 % noise and
+  4.24 at 5 %: `qhat` ran to 0 and to 25 and the state came apart by t = 5
+  (`error_u` 22 against a clean 0.02).  1D had taken the same noise well.
+  There were three causes, each measured.
+
+  *The stiff walls read the noise.*  f's wall term `beta (z . n)(w . n)` sat
+  on the datum, with `beta = 100` and no restoring force on the state: a
+  load of the noise's normal trace.  Each term's U* norm on the data's noise
+  `e` at steady flow, relative to the parameter's own term (`h = 0.05`,
+  from the checkpoints):
+
+  | noise | wall term | `C e` | `q div grad e` | convection | `D_t` |
+  |---|---|---|---|---|---|
+  | 1 % | **1.6 - 2.7** | 0.22 | 0.12 | 0.08 | 0.01 |
+  | 5 % | **2.5 - 4.0** | 0.37 | 0.20 | 0.19 | 0.03 |
+
+  That one term was the effective noise of 2.0 and 3.1, and its sublinear
+  growth with the level.  Fix: the term joins C as well (`tracking_boundary`,
+  C + B in place of C).  The estimator is `u_t + (C + B)(u - z) + f(q, z) =
+  g` with B in f, so B z cancels and B acts on u alone; the error equation
+  gains the dissipation `beta ||eps . n||^2` and keeps its fixed point.
+  Noise-free the change is 0.1150 -> 0.1156 at t = 20 (`h = 0.15`).  At 1 %
+  on the production mesh, t = 2: `qhat` peaks at 1.5 for 3.8, error 0.47 for
+  0.62.  The U-norm of the residuals is now C's energy norm.
+
+  *The filter lagged the inlet.*  The filter ran over every dof, the
+  constrained ones too, so the datum lagged the inflow the state took
+  exactly: `u - z` left the homogeneous space during the ramp.  Fix: the
+  constrained dofs stay out of the filter, `u = z = h` on the boundary as
+  in the papers (AMMC (11), Section 6).  That leaves a jump to the lagging
+  interior, one element wide, which pins about 1.5 % of the cells at 0 (at
+  the inlet, during the ramp).  Tried and reverted on 2026-11-07, as
+  departures from (11), which keeps g itself and has `u = z = h`: the state
+  taking the filtered boundary values, and a source filtered as the data
+  are.  The first removed the pinned cells but not the error (`h = 0.1`,
+  `RAMP = 20`, exact against filtered boundary: 1 %, tau = 0.86, t = 20:
+  0.189, 0.222; 5 %, tau = 0.75, t = 10: 0.437, 0.366; 5 %, tau = 2.5,
+  t = 15: 0.375, 0.370).  The second helped 1D (`h = 0.1`, t = 40; 5 %:
+  0.343 -> 0.207, 1 %: 0.142 -> 0.132) and rested on an argument of ours in
+  neither paper: the filter commutes with `D_t` and a linear f, so filtered
+  data solve the model with filtered inputs.  With the source exact, a
+  time-dependent g leaves `-tau D_t g` in the data's residual.  Also since
+  2026-11-03: the papers' `R_sp` is pointwise in time and `R_ti` enters only
+  the sigma-term, so at sigma = 0 they have no time filter; ours feeds every
+  term.  Proposition 2.3's proof uses only the bound (28), with the lag
+  counted in `delta_sp`, and it is for sigma = 1 alone.
+
+  *The filter was too short, the ramp too fast.*  What the first two leave
+  is a bias and a wander.  Noise in the regressor attenuates: `qhat` sits
+  low in the mean by about 0.45 of its rms error in every noisy 1D run
+  (-0.0074 at 1 %, -0.030 at 5 %, mean q 0.15), as errors-in-variables
+  regressions do.  1D has excitation everywhere to hold it; most of this
+  channel is near plug flow and has none.  Medians of `qhat` on the 0.5
+  background at `h = 0.1`, 1 %: 0.457 at the old filter, 0.500 at the long
+  one.  The residual is now the convection's commutator with the filter,
+  which scales as `(tau / RAMP)^2`, hence the slow ramp.  At `h = 0.1`,
+  `RAMP = 20` (`error_q`: lowest, and at the end of the run):
+
+  | noise | `tau` | lowest (at t) | at t = 30 | at t = 40 |
+  |---|---|---|---|---|
+  | 1 % | 0.086 (`RAMP = 5`) | 0.32 (stalled) | | |
+  | 1 % | 0.86 | 0.197 (24) | 0.260 | |
+  | 1 % | **2.6** | **0.152 (24.5)** | 0.177 | 0.213 |
+  | 1 % | 5 | 0.236 by t = 30 | 0.236 | |
+  | 5 % | 0.25 (`RAMP = 5`) | 0.60 (t = 5, rising) | | |
+  | 5 % | 2.5 | 0.319 (9.5) | 0.419 | 0.404 |
+  | 5 % | **5** | **0.311 (24.5)** | 0.356 | 0.342 |
+
+  All three shapes stand out at both levels; what is left runs along the
+  shear layers, where `|grad z|` makes `q_t` largest.  The error rises again
+  past t = 25 as the sway carries those layers on: the theory's term growing
+  with time for noise that never stops, which is what a discrepancy stop is
+  for.  (The table is at `U = 20` with the filtered boundary and source
+  later reverted; see below for `U = 40`.)  Shipped: `smooth_scale = 100` (tau = 1.7 at 1 %, between
+  the two tried there, and 5 at 5 %).  The production mesh follows the
+  coarse runs (`h = 0.05`, `RAMP = 20`, tau = 2.6 and 5, to t = 30): 1 %:
+  0.207, lowest 0.190; 5 %: 0.403, lowest 0.370; against 3.19 and 4.24
+  before.  That is above `h = 0.1` (0.152, 0.311): the richer the space, the
+  less each coefficient averages, so with noise a finer Q_h is noisier.  P1
+  shows the same (1 %, `h = 0.05`, t = 15: 0.253 for P0's 0.216).
+
+  What did not work, so that nobody repeats it.  The tracked datum from an
+  independent stream of draws: no effect, as the attenuation does not come
+  from there.  The parameter law's regressor from an independent stream
+  (instrumental variables): the block system loses its symmetry and the
+  energy identity its cancellation, and it diverged, q to 92 at 5 %.  The
+  filter on z minus the harmonic extension of the boundary data: more
+  overshoot in the ramp, 2.45 at 1 % and 5.85 at 5 %.
+- More flow at the outlet (2026-11-07, the user's call: slip barriers,
+  `U_MEAN = 40`, no source).  Forward model, `h = 0.1` unless said, flux
+  through the outlet over the inlet's:
+
+  | lever | outflow |
+  |---|---|
+  | no-slip barriers, `U = 20 / 30 / 40 / 60` (t = 12.5; 7.5 for 30, 40) | 55 / 60 / 62 / 63 %, saturating |
+  | slip barriers, `U = 20` | 71 % |
+  | slip barriers, `h = 0.05`, `U = 20 / 30 / 40` (t = 15.6) | 67 / 74 / 79 % |
+  | a uniform body force `G = 20 / 40 / 80` (rejected) | 89 / 114 / 153 % |
+
+  `U` runs out with no-slip barriers because Burgers flow has no pressure:
+  nothing refills a barrier's shadow, or turns flow along a bulging wall,
+  but viscosity.  The body force would have stood in for the missing
+  pressure drop, but the flow stays driven by its inflow alone.  The sway
+  went 20 % slower on the same day (period 50 -> 62.5), and `RAMP` to 40:
+  the filter's lag and its commutator with the convection go with
+  `D_t u_in`, so doubling U doubled them (at `h = 0.1`, t = 15, `RAMP` 20
+  -> 40: 1 % 0.35 -> 0.25, 5 % 0.60 -> 0.43).
+
+  Accuracy at `U = 40`, forward model at `RAMP = 20`: the peak velocity is
+  the inflow's, with an undershoot of 0.05 (no overshoot past Burgers'
+  maximum principle); `dt / 2` changes the flow by 2e-5 at t = 20; `h / 2`
+  at half strength (t = 10) by 2.5e-4 in L2, 1.3 % in the gradient; and
+  `h = 0.1` against `h = 0.05` at full strength (t = 20) differ by 8.6e-4,
+  6.1 % in the gradient, outflow 82.4 and 82.3 %.  The `h / 2` run at full
+  strength was stopped under load before it reached full strength.  At the
+  production settings (`RAMP = 40`; `scripts/flow_check.py`, t = 20 / 40 /
+  50): `dt / 2` changes the flow by at most 6.4e-6 in L2 and 1.3e-5 in the
+  gradient; `h = 0.1` and `h = 0.05` differ by at most 7.3e-4 and 6.0 %; the
+  vertical velocity stays in [0.07, the inflow's peak]; the horizontal one
+  reaches 19 against the inflow's 9.5 -- the slip surfaces turn the flow, and
+  couple the components, so no per-component maximum principle holds there;
+  the outflow is 70 / 87 / 86 % of the inflow.
 - Inflow strength (history, with the modulated inflow and `S = 5`;
   2026-10-29; noise-free, `dt = 0.05`, to `t = 10`;
   reach = first time the datum at the outlet's centre exceeds 10 % of the

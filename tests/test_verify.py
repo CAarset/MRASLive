@@ -88,8 +88,8 @@ EXPECTED = {
                    "persistent": OK, "Gramian": OK, "convergence": UNVERIFIABLE,
                    "reconstruction": OK, "seeded": OK},
     "burgers_2d": {"adjoint": OK, "coupling pre-verif": OK, "(A1)": OK,
-                   "(A2)": FAIL, "(A3)": OK, "persistent": FAIL, "Gramian": FAIL,
-                   "convergence": FAIL, "reconstruction": OK, "seeded": OK},
+                   "(A2)": FAIL, "(A3)": OK, "persistent": OK, "Gramian": OK,
+                   "convergence": OK, "reconstruction": OK, "seeded": OK},
 }
 
 

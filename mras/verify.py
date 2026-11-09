@@ -83,11 +83,19 @@ import warnings
 
 import numpy as np
 from ngsolve import (BilinearForm, CoefficientFunction, GridFunction,
-                     InnerProduct, Integrate, LinearForm, MultiVector,
+                     InnerProduct, Integrate, LinearForm,
                      Preconditioner, dx, grad, x as xc, y as yc, z as zc)
 from ngsolve.solvers import BVP
 
 from .adjoint import adjoint_mismatch
+# The operators of the persistent excitation and the U-norm, shared with the
+# pictures of where the data excite (mras.excitation).
+from .excitation import (coupling_matrix as _coupling_matrix,  # noqa: F401
+                         dense as _dense, gramian_term as _gram,
+                         has_dirichlet as _dirichlet,
+                         linearisation_point as _linearisation_point,
+                         mass_whitening as _q_mass_whitening,
+                         u_gram as _u_gram)
 from .solvers import factorize
 
 OK, FAIL, UNVERIFIABLE, DEVIATION, ESTIMATED = (
@@ -161,25 +169,8 @@ def _l2sq(problem, cf):
     return _int(problem, cf * cf)
 
 
-def _dirichlet(problem):
-    """Whether U_h has a Dirichlet part (constrained dofs)."""
-    free = problem.Ufes.FreeDofs()
-    return free.NumSet() < len(free)
 
 
-def _u_gram(problem):
-    """The U-norm on U_h, as its Gram form: ||grad v|| where U_h has a
-    Dirichlet part (a norm by Poincare-Friedrichs, the paper's choice), the
-    full H1 norm where it has none.  (A1), (A3) and the persistent
-    excitation all measure in it."""
-    U = problem.Ufes
-    u, v = U.TnT()
-    form = BilinearForm(U)
-    form += InnerProduct(grad(u), grad(v)) * problem.dx
-    if not _dirichlet(problem):
-        form += InnerProduct(u, v) * problem.dx
-    form.Assemble()
-    return form
 
 
 def _u_norm_name(problem):
@@ -187,31 +178,10 @@ def _u_norm_name(problem):
         "||v||_U = H1 norm"
 
 
-def _dense(mat, n):
-    rows, cols, vals = mat.COO()
-    out = np.zeros((n, n))
-    np.add.at(out, (np.array(rows), np.array(cols)), np.array(vals))
-    return out
 
 
-def _q_mass_whitening(problem):
-    """L^-1 for the Cholesky factor L of the Q_h mass matrix: eigenvalues
-    relative to ||.||_H become plain symmetric eigenvalues."""
-    Q = problem.Qfes
-    p, s = Q.TnT()
-    form = BilinearForm(Q)
-    form += p * s * problem.dx
-    form.Assemble()
-    return np.linalg.inv(np.linalg.cholesky(_dense(form.mat, Q.ndof)))
 
 
-def _linearisation_point(problem):
-    """q~ for f_q(q~, z) in the probes: the truth where it is known, else
-    the run's start; f affine in q does not see it."""
-    for start in (problem.q_true, problem.q0):
-        if start is not None:
-            return problem.project_q(start)
-    return problem.project_q(problem.initial_guess())
 
 
 def check_adjoint(problem, state):
@@ -663,6 +633,10 @@ def check_a3(problem, a2, affine=None):
                      "boundary trace, -Laplace_Tr)")
     lam1 = _lambda1(problem)
     norm = f"in ||v||_U = ||grad v||, a norm by Poincare (lambda_1 = {lam1:.3g})"
+    # A boundary part of C (non-negative) only adds to the form.
+    u, v = problem.Ufes.TnT()
+    is_ = (">=" if problem._on_boundary(problem.tracking_boundary(u, v),
+                                        problem.order) else "=")
     if problem.C_scale is None:
         return Check(name, UNVERIFIABLE,
                      f"C(||q||) = c(||q||) (-Laplace) is coercive {norm} for "
@@ -671,8 +645,8 @@ def check_a3(problem, a2, affine=None):
     c = problem.C_scale
     if affine:
         return Check(name, OK,
-                     f"L = 0 (f affine in q), so M~ = M: <Cv, v> = {c:.3g} "
-                     f"||v||_U^2 {norm}, M = N~ = {c:.3g}", c)
+                     f"L = 0 (f affine in q), so M~ = M: <Cv, v> {is_} "
+                     f"{c:.3g} ||v||_U^2 {norm}, M = N~ = {c:.3g}", c)
     if problem.L is None:
         return Check(name, UNVERIFIABLE,
                      "no (A1) constant available: declare L on the class "
@@ -684,7 +658,7 @@ def check_a3(problem, a2, affine=None):
     need = problem.L ** 2 / (2 * a2.value)
     if c > need:
         return Check(name, OK,
-                     f"<Cv, v> = {c:.3g} ||v||_U^2 {norm} > L^2/(2 C_coe) "
+                     f"<Cv, v> {is_} {c:.3g} ||v||_U^2 {norm} > L^2/(2 C_coe) "
                      f"= {need:.3g}: M = {c - need:.3g}", c - need)
     return Check(name, FAIL,
                  f"<Cv, v> = {c:.3g} ||v||_U^2 {norm} <= L^2/(2 C_coe) = "
@@ -693,29 +667,8 @@ def check_a3(problem, a2, affine=None):
 
 # -- persistent excitation --------------------------------------------------
 
-def _coupling_matrix(problem, z, q_lin):
-    """B = f_q(q~, z): Q_h -> U_h*, assembled."""
-    U, Q = problem.Ufes, problem.Qfes
-    p, v = Q.TrialFunction(), U.TestFunction()
-    b = BilinearForm(trialspace=Q, testspace=U)
-    b += p * problem.coupling_adjoint(q_lin, z, v) * problem.dx
-    b.Assemble()
-    return b.mat
 
 
-def _gram(problem, mat, inv):
-    """B^T K^-1 B on Q_h, K the U-norm Gram matrix: p^T (B^T K^-1 B) p =
-    ||B p||_U*^2."""
-    Q = problem.Qfes
-    cols = MultiVector(mat.CreateColVector(), Q.ndof)
-    unit = mat.CreateRowVector()
-    for j in range(Q.ndof):
-        unit[:] = 0.0
-        unit[j] = 1.0
-        cols[j].data = mat * unit
-    solved = MultiVector(mat.CreateColVector(), Q.ndof)
-    solved[:] = inv * cols
-    return np.array(InnerProduct(solved, cols))
 
 
 def _pe_gram(problem, z, q_lin, inv):

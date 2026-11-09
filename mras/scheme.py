@@ -144,6 +144,15 @@ class MRASProblem:
                                    read ``t.Get()`` for data indexed by time.
     ``tracking_scale(q)``          c in the tracking operator C = c (-Laplace);
                                    the constant ``C_scale`` unless overridden.
+    ``tracking_boundary(u, w)``    a boundary part of C (bilinear, symmetric,
+                                   non-negative, q-free; by boundary name as
+                                   for ``model_boundary``): C = c (-Laplace
+                                   + B).  A linear q-free term of f can go
+                                   here as well as there: it then acts on the
+                                   state, not on the datum, and the data's
+                                   noise does not reach the estimator through
+                                   it, with the same error equation and fixed
+                                   point and C's coercivity only improved.
     ``dirichlet(t)``               the Dirichlet data at time ``t``, by
                                    boundary: ``{name: value}`` for boundaries
                                    of the Dirichlet part of U_h, the others
@@ -248,7 +257,10 @@ class MRASProblem:
     ``smooth_data``      noisy data enter smoothed, R_sp(R_ti(z^delta))
                          (Kaltenbacher-Nguyen 2021, (28), whatever the
                          noise): a time filter of time constant
-                         ``smooth_time`` (5 delta^(2/3) dt^(1/3) unless set)
+                         ``smooth_time`` (``smooth_scale`` delta^(2/3)
+                         dt^(1/3) unless set, ``smooth_scale`` being
+                         ``robust.FILTER_TIME`` unless a problem's data vary
+                         more slowly)
                          and, with ``smooth_space`` (on), one heat step in
                          space, R_sp taking data bounded in Z to data close
                          in U (:class:`mras.robust.Smoother`); clean data
@@ -292,6 +304,7 @@ class MRASProblem:
     noise_nu = 1.0
     smooth_data = True
     smooth_time = None
+    smooth_scale = robust.FILTER_TIME
     smooth_space = True
     discrepancy = None  # robust.DISCREPANCY = 1.1 turns the stop on
     projection = True
@@ -391,6 +404,10 @@ class MRASProblem:
         """c in C(||q||) = c (-Laplace)."""
         return self.C_scale
 
+    def tracking_boundary(self, u, w):
+        """Density of the boundary part of the tracking operator C (see
+        the class docstring), or ``{boundary: density}``."""
+
     def dirichlet(self, t):
         """The Dirichlet data at time ``t``: ``{boundary: value}``, each
         boundary a name (or regular expression) of the mesh's boundaries on
@@ -434,12 +451,19 @@ class MRASProblem:
         dx, ds = measures(order)
         terms = [term * dx for term in _terms(self.model(u, w))]
         if boundary:
-            densities = self.model_boundary(u, w)
-            if not isinstance(densities, Mapping):
-                densities = {None: densities}
-            for region, density in densities.items():
-                surface = measures(order, region)[1]
-                terms += [term * surface for term in _terms(density)]
+            terms += self._on_boundary(self.model_boundary(u, w), order)
+        return terms
+
+    @staticmethod
+    def _on_boundary(densities, order):
+        """Boundary densities as weak forms in the quadrature of ``order``:
+        those keyed by boundary name over that boundary only."""
+        if not isinstance(densities, Mapping):
+            densities = {None: densities}
+        terms = []
+        for region, density in densities.items():
+            surface = measures(order, region)[1]
+            terms += [term * surface for term in _terms(density)]
         return terms
 
     def f_terms(self, q, u, w, order=None, boundary=True):
@@ -650,9 +674,13 @@ class MRASProblem:
         # state row (13): f(q^{n+1}; qk, z) = f(qk, z) + f_q(qk, z)(q - qk)
         a += InnerProduct(u, v) * self.dx
         a += dt * scale * InnerProduct(grad(u), grad(v)) * self.dx
+        for term in self._on_boundary(self.tracking_boundary(u, v), self.order):
+            a += dt * scale * term
         a += dt * q * ca(qk, z, v) * self.dx
         res += InnerProduct(gfu, v) * self.dx
         res += dt * scale * InnerProduct(grad(z), grad(v)) * self.dx
+        for term in self._on_boundary(self.tracking_boundary(z, v), self.order):
+            res += dt * scale * term
         for term in self._source_terms(state, v):
             res += dt * term
         for term in self.model_terms(z, v):
@@ -687,7 +715,16 @@ class MRASProblem:
             stiff.Assemble()
             cache = self._cache = {"Mu": mass(self.Ufes, self.dx),
                                    "Au": stiff.mat,
+                                   "Cu": stiff.mat,
                                    "Mq": mass(self.Qfes, self.dx)}
+            walls = self._on_boundary(self.tracking_boundary(u, v), self.order)
+            if walls:  # C = -Laplace + its boundary part
+                tracking = BilinearForm(self.Ufes)
+                tracking += InnerProduct(grad(u), grad(v)) * self.dx
+                for term in walls:
+                    tracking += term
+                tracking.Assemble()
+                cache["Cu"] = tracking.mat
             cache["Mq_inv"] = factorize(cache["Mq"], symmetric=True)
             # The state matrix M + dt c A: its values are rewritten in place
             # when c varies, and it is factorised once when c does not.
@@ -701,13 +738,13 @@ class MRASProblem:
         return self._cache
 
     def _state_operator(self, scale):
-        """M + dt c A on U_h and its Cholesky factors, rebuilt only when c
+        """M + dt C on U_h and its Cholesky factors, rebuilt only when c
         changes."""
         cache = self._cache
         if cache["scale"] != scale:
             cache["Su"].AsVector().data = (cache["Mu"].AsVector()
                                            + (self.dt * scale)
-                                           * cache["Au"].AsVector())
+                                           * cache["Cu"].AsVector())
             cache["Su_inv"] = factorize(cache["Su"], self.Ufes.FreeDofs(),
                                         symmetric=True)
             cache["scale"] = scale
@@ -754,7 +791,7 @@ class MRASProblem:
         return self._step_rows(state)
 
     def _state_rhs(self, state, scale, f_q, u_old=None):
-        """M u^n + dt c A z + dt <g - f(0, z) - (q-part of f), v> on U_h
+        """M u^n + dt C z + dt <g - f(0, z) - (q-part of f), v> on U_h
         (u^n the estimate's, or ``u_old``)."""
         cache = self._cache
         w = self.Ufes.TestFunction()
@@ -766,7 +803,7 @@ class MRASProblem:
         form.Assemble()
         u_old = state.gfu.vec if u_old is None else u_old
         return (cache["Mu"] * u_old
-                + (self.dt * scale) * (cache["Au"] * state.z.vec)
+                + (self.dt * scale) * (cache["Cu"] * state.z.vec)
                 + form.vec).Evaluate()
 
     def _equation_base(self, state):
@@ -801,14 +838,15 @@ class MRASProblem:
         return robust.dual2(inv, total), robust.dual2(inv, form.vec)
 
     def _u_norm_inverse(self):
-        """The inverse Riesz map of the U-norm on U_h: ||grad v|| where U_h
-        has a Dirichlet part, the H1 norm where it has none (as the
+        """The inverse Riesz map of the U-norm on U_h: C's energy norm
+        (||grad v||, with a boundary part of C its own term as well) where
+        U_h has a Dirichlet part, the H1 norm where it has none (as the
         checklist's)."""
         cache = self._prepare()
         if "Ku_inv" not in cache:
             free = self.Ufes.FreeDofs()
-            gram = cache["Au"].CreateMatrix()
-            gram.AsVector().data = cache["Au"].AsVector()
+            gram = cache["Cu"].CreateMatrix()
+            gram.AsVector().data = cache["Cu"].AsVector()
             if free.NumSet() == len(free):
                 gram.AsVector().data += cache["Mu"].AsVector()
             cache["Ku"] = gram

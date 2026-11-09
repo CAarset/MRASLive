@@ -68,8 +68,10 @@ class ModelFit:
                                       0.0))
         u, v = p.Ufes.TnT()
         weight = BilinearForm(p.Ufes, symmetric=True)
-        weight += p.tracking_scale(self.reference) * InnerProduct(
-            grad(u), grad(v)) * p.dx
+        scale = p.tracking_scale(self.reference)
+        weight += scale * InnerProduct(grad(u), grad(v)) * p.dx
+        for term in p._on_boundary(p.tracking_boundary(u, v), p.order):
+            weight += scale * term
         if free.all():  # no Dirichlet part: C alone is only semidefinite
             weight += InnerProduct(u, v) * p.dx
         weight.Assemble()

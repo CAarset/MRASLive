@@ -45,14 +45,15 @@ from mras.scheme import MRASProblem
 LENGTH, HEIGHT = 6.0, 1.2
 
 HOLES = (1.5, 3.0, 4.5)  # hole centres along the centre line y = HEIGHT / 2
-HOLE_R = 0.18
+HOLE_R = 0.27
 
 # Three beams of light, one emitted from each hole: a wedge of 10 - 20
 # degrees, of constant strength along its direction out to the walls or the
 # pipe ends, flat across it and falling off smoothly only near its edges.
 # Light does not pass the holes: each beam leaves the shadows of the other
-# two dark.  Each beam pulses (|sin|: positive light; ``signed=True`` makes
-# it heat and cool in turn), breathes in width, and turns slowly around its
+# two dark.  Each beam pulses (|sin|, never below ``PULSE_FLOOR`` of its peak:
+# positive light; ``signed=True`` makes it heat and cool in turn, through
+# zero), breathes in width, and turns slowly around its
 # hole, alternate beams in opposite senses; beams cross freely.  Its pulse,
 # its width and its turn run at periods of their own, drawn from
 # P_n = 24 * 2**frac(n PHI) (25 - 39 time units, at least 1.4 apart,
@@ -67,6 +68,7 @@ PHI = (1 + 5**0.5) / 3
 WIDTH, WIDTH_WOBBLE = 15.0, 5.0   # full beam width, degrees
 EDGE = 4                          # flatness of the beam's angular profile
 AMPLITUDE = 30.0                  # peak heating
+PULSE_FLOOR = 0.25                # the light's minimum, as a fraction of its peak
 
 
 def _period(n):
@@ -112,7 +114,7 @@ def SOURCE(t, beams=(0, 1, 2), signed=False, period_scale=1.0):
         profile = exp(-(atan2(across, along) / half) ** EDGE)
         pulse = sin(2 * pi * t / period(3 * k + 1) + 1.3 * k + 0.4)
         if not signed:
-            pulse = (pulse ** 2) ** (1 / 2)
+            pulse = PULSE_FLOOR + (1 - PULSE_FLOOR) * (pulse ** 2) ** (1 / 2)
         g = g + AMPLITUDE * pulse * profile * _lit(k, dx, dy)
     return g
 
@@ -167,12 +169,12 @@ class Burgers1DDark(Burgers1D):
 PROBLEMS = {"burgers_1d": Burgers1D,
             "burgers_1d_dark": Burgers1DDark}
 
-# Q_h is discontinuous P1: the best fit of q_true in it is 0.069% off at
-# h = 0.05 and 0.26% at h = 0.1 (P0: 1.1% and 2.3%), so a reconstruction
+# Q_h is discontinuous P1: the best fit of q_true in it is 0.071% off at
+# h = 0.05 and 0.29% at h = 0.1 (P0: 1.2% and 2.4%), so a reconstruction
 # within 1% is possible in principle.
 DEFAULTS = {name: dict(h=0.05, dt=0.025, tend=100.0, k_q=1)
             for name in PROBLEMS}
-# The audit runs to t = 1: the beams take q from 1 to 0.81 by then (0.90
+# The audit runs to t = 1: the beams take q from 1 to 0.88 by then (0.94
 # at t = 0.5, too close to the checklist's 10 % descent to be a verdict).
 CHECK = {"burgers_1d": dict(h=0.35, dt=0.05, tend=1.0)}
 QUICK = {name: dict(h=0.35, dt=0.05, tend=0.5) for name in PROBLEMS}

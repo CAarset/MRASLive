@@ -42,7 +42,8 @@ from .solvers import factorize
 # it leaves of a datum drawn afresh every step, O(delta (dt / tau)^(1/2)) --
 # the order-optimal choice for data of a fixed time scale, its constant
 # fitted on the Burgers pipe (2026-11-03: Matern noise at 1 % and 5 %, best
-# at about 2 and 5 steps of 0.05).
+# at about 2 and 5 steps of 0.05).  It grows with the data's time scale: a
+# problem whose data vary slowly sets its own (``smooth_scale``).
 FILTER_TIME = 5.0
 WINDOW_STEPS = 50    # time constant of the residuals' running means, in steps
 DISCREPANCY = 1.1    # tau: stop at tau times the effective noise level
@@ -53,10 +54,10 @@ LEAKAGE = 1.0        # leakage rate per unit noise level, per unit time
 ALPHA_STEPS = 40     # bisection steps of the smoother's alpha (log scale)
 
 
-def filter_time(dt, noise_level):
-    """The time filter's default time constant (``FILTER_TIME``), at least a
-    step."""
-    return max(dt, FILTER_TIME * noise_level ** (2 / 3) * dt ** (1 / 3))
+def filter_time(dt, noise_level, scale=FILTER_TIME):
+    """The time filter's default time constant (see ``FILTER_TIME``), at
+    least a step."""
+    return max(dt, scale * noise_level ** (2 / 3) * dt ** (1 / 3))
 
 
 def _h_norm(mass, vec):
@@ -72,7 +73,10 @@ class Smoother:
     tau = ``filter_time(dt, delta)`` unless given:
     white noise of level delta leaves ``delta (w / (2 - w))^(1/2)`` in it,
     w = dt / tau, and its time derivative is bounded by about delta / tau
-    instead of delta / dt; the price is a lag of about tau D_t z.  In space,
+    instead of delta / dt; the price is a lag of about tau D_t z.  The
+    constrained dofs stay out of the filter: they are boundary data, known
+    exactly and free of noise, and the papers have u = z = h on the
+    boundary, so the error stays in the homogeneous space.  In space,
     one implicit heat step, ``(M + alpha A) R = M zbar`` with the
     constrained dofs (the boundary data) kept.  alpha follows the
     discrepancy rule of the smoother: ``||R zbar - zbar||_H = delta_f
@@ -85,11 +89,13 @@ class Smoother:
     def __init__(self, problem, noise_level, tau=None, space=True):
         self.problem = problem
         self.delta = float(noise_level)
-        self.tau = float(tau) if tau else filter_time(problem.dt, noise_level)
+        self.tau = (float(tau) if tau else
+                    filter_time(problem.dt, noise_level, problem.smooth_scale))
         self.weight = min(1.0, problem.dt / self.tau)
         cache = problem._prepare()
         self.mass, self.stiff = cache["Mu"], cache["Au"]
         self.free = problem.Ufes.FreeDofs()
+        self.fixed = ~np.fromiter(self.free, dtype=bool)
         self.zbar = GridFunction(problem.Ufes)
         self.out = GridFunction(problem.Ufes)
         self.count = 0
@@ -109,6 +115,7 @@ class Smoother:
             # zbar)`` reads zbar while it writes it, which NGSolve's lazy
             # evaluation does not order.
             zbar += self.weight * (z.vec.FV().NumPy() - zbar)
+            zbar[self.fixed] = z.vec.FV().NumPy()[self.fixed]
         self.count += 1
         if self.alpha == 0.0:
             self.out.vec.data = self.zbar.vec

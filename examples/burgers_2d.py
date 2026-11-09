@@ -4,8 +4,8 @@
 The velocity u = (u_1, u_2) obeys
 
     u_t - div(q grad u) + S (u . grad) u = 0      in the channel,
-    u = u_in(t) on the inlet,  u = 0 on the barriers (no-slip),
-    q grad u . n + beta (u . n) n = 0 on the walls (slip walls),
+    u = u_in(t) on the inlet,
+    q grad u . n + beta (u . n) n = 0 on the walls and barriers (slip),
     q grad u . n = 0 on the outlet (do-nothing outflow),
 
 in a vertical channel (``mras.domains.burgers_channel``): the inlet at the
@@ -25,34 +25,41 @@ time-dependent Dirichlet values -- the state and the datum carry the same
 inflow, so the MRAS error lives in the homogeneous space, as the theory
 requires.
 
-Burgers flow has no pressure to push it along: no-slip walls would drain
-its momentum, sideways into the walls at a rate of about q (pi / w)^2 in a
-lane of width w, and the flow would reach about S U_MEAN w^2 / (pi^2 q)
-before dying out.  The walls are slip walls instead: no stress along them,
-and a stiff resistance ``WALL_RESISTANCE`` = beta against flow through them
-(a Robin condition), which lets through about q du_n/dn / beta.  Only the
-barriers drain the flow.  The convection is moderate, S U_MEAN = 20: Burgers
-flow steepens into layers about q / (S U) wide, here 0.025, half an element
-of the estimator's mesh, and the flow spreads across the channel, about half
-of it reaching the outlet; at S U = 50 the inflow runs on as a jet
-(docs/DEVIATIONS.md).  The parameter law scales with the datum squared, so
-the inflow's speed sets how fast the estimate moves as well.
+Burgers flow has no pressure to push it along: no-slip surfaces would drain
+its momentum, sideways into them at a rate of about q (pi / w)^2 in a lane
+of width w, and the flow would reach about S U_MEAN w^2 / (pi^2 q) before
+dying out.  Walls and barriers are slip surfaces instead: no stress along
+them, and a stiff resistance ``WALL_RESISTANCE`` = beta against flow through
+them (a Robin condition), which lets through about q du_n/dn / beta.  What
+meets a barrier head-on still stops, and leaves a shadow that only viscosity
+fills.  The parameter law scales with the datum squared, so the inflow's
+speed sets how fast the estimate moves as well.
 
 f(q, u) = -div(q grad u) + S (u . grad) u, with the walls' resistance (a
 q-free, linear boundary term), is linear in q (sigma = 0, L = 0); the
 parameter law is q_t = grad z : grad (u - z), the Frobenius product of the
 velocity gradients, and the convection is evaluated on the datum (Remark
-2.1).  C = -Laplace, componentwise, with walls and outlet natural, so
-Poincare holds through the Dirichlet part (inlet and barriers) and (A3) is
-as for Darcy.
+2.1).  C = -Laplace, componentwise, with slip surfaces and outlet natural,
+plus their resistance B: on f alone B would act on the datum, and the stiff
+beta would take its noise's normal trace for a load several times the
+parameter's own term; in C as well, B acts on the state instead, and the
+error equation is that of C + B, coercive with Poincare through the Dirichlet
+part (the inlet), so (A3) is as for Darcy.
 (A2) is the gradient-coupling situation of Remark 4.2: identifiability
 rests on persistent excitation, here from the inflow alone.  It rises
 smoothly from rest, tapers toward the walls and sways slowly from side to
-side, one sine of period ``SWAY_PERIOD`` = 50 against a settling time under
+side, one sine of period ``SWAY_PERIOD`` = 62.5 against a settling time under
 10, so that the flow passes through near-steady states.  A steady
 flow z excites h only where div(h grad z) is not small -- where it shears
 -- and a held inflow leaves the estimate stalled where its one steady
 flow does not; the sway moves the shear about the channel.
+
+Noisy data want a long time filter here: most of the channel is near plug
+flow, so nothing holds q where noise pulls it, and the noise is relative to
+a datum whose gradient is small beside its mean.  The flow is slow enough to
+allow one (``smooth_scale``), and the ramp is slow so that the filter's
+commutator with the convection stays small while the flow is being set up
+(docs/DEVIATIONS.md).
 
     .venv/bin/python -m mras.live burgers_2d --quick
 """
@@ -66,14 +73,14 @@ from mras.domains import burgers_channel
 from mras.fields import subdomain_field
 from mras.scheme import MRASProblem
 
-U_MEAN = 20         # centreline inflow speed, once ramped up
+U_MEAN = 40         # centreline inflow speed, once ramped up
 STRENGTH = 1        # S, the strength of the convection
-RAMP = 5.0          # the inflow rises smoothly from rest over this time, then holds
+RAMP = 40.0         # the inflow rises smoothly from rest over this time, then holds
 WALL_TAPER = 0.5    # the inflow at the walls, as a fraction of its centre
 SWAY = 0.25         # the transverse inflow's peak, as a fraction of U_MEAN
-SWAY_PERIOD = 50.0  # its period, slow beside the flow's settling (t < 10)
-WALL_RESISTANCE = 100.0  # beta of the slip walls, against flow through them
-NO_SLIP = "inlet|barrier"  # the Dirichlet part: the inflow, and the barriers
+SWAY_PERIOD = 62.5  # its period, slow beside the flow's settling (t < 10)
+WALL_RESISTANCE = 100.0  # beta of the slip surfaces, against flow through them
+SLIP = "wall|barrier"    # the slip surfaces
 Q_BACKGROUND, Q_SHAPES = 0.5, 1.0   # the true viscosity: background, shapes
 Q_START = 0.75      # the initial estimate qhat_0, between the two
 
@@ -112,11 +119,12 @@ class Burgers2D(MRASProblem):
     name = "burgers_2d"
     sigma = 0.0
     L = 0.0
+    smooth_scale = 100.0  # tau = 1.7 at 1 % noise, 5 at 5 %
 
     def __init__(self, h=0.12, dt=0.05, tend=10.0, k_u=3, k_q=0, seed=0,
                  fitted=False):
         super().__init__(burgers_channel(maxh=h, order_u=k_u, order_q=k_q,
-                                         dirichlet=NO_SLIP, fitted=fitted),
+                                         dirichlet="inlet", fitted=fitted),
                          dt=dt, tend=tend, k_u=k_u, seed=seed)
         self.u0 = CoefficientFunction((0, 0))  # at rest; the inflow ramps up
         # The shapes on a mesh of their own, exact there.
@@ -130,14 +138,17 @@ class Burgers2D(MRASProblem):
         return Q_START
 
     def dirichlet(self, t):
-        # The inflow on the inlet; the barriers, the rest of the Dirichlet
-        # part, no-slip.
         return {"inlet": inflow(t)}
 
     def model_boundary(self, u, w):
-        # Slip walls: a stiff resistance to flow through them, none along.
-        return {"wall": WALL_RESISTANCE * InnerProduct(u, self.normal)
+        # A stiff resistance to flow through them, none along.
+        return {SLIP: WALL_RESISTANCE * InnerProduct(u, self.normal)
                 * InnerProduct(w, self.normal)}
+
+    def tracking_boundary(self, u, w):
+        # The same term in C: on the state, not on the noisy datum, whose
+        # normal trace the stiff beta would otherwise take for a load.
+        return self.model_boundary(u, w)
 
     def model(self, u, w):
         return STRENGTH * InnerProduct(grad(u) * u, w)
@@ -155,8 +166,7 @@ PROBLEM = Burgers2D
 
 # Q_h is P0, the class of the shapes.
 DEFAULTS = {"burgers_2d": dict(h=0.05, dt=0.05, tend=100.0)}
-# The audit runs to t = 3, still under the inflow's ramp, where q has come
-# from 0.44 to 0.25; the flow has not reached the outlet by then, so the
-# excitation fails there.
-CHECK = {"burgers_2d": dict(h=0.35, dt=0.05, tend=3.0)}
+# The audit stops under the inflow's ramp, where q has come from 0.44 to
+# 0.36.
+CHECK = {"burgers_2d": dict(h=0.35, dt=0.05, tend=8.0)}
 QUICK = CHECK

@@ -299,8 +299,8 @@ def test_dirichlet_data_reach_both_models(scheme):
 
 def test_boundary_data_are_imposed_by_boundary_name():
     # 2D Burgers is driven by its inflow alone: no source, the inflow
-    # imposed on the inlet as Dirichlet data, the barriers no-slip -- in the
-    # estimator's state and in the datum alike; the walls are slip walls.
+    # imposed on the inlet as Dirichlet data -- in the estimator's state and
+    # in the datum alike; the walls and barriers are slip surfaces.
     from ngsolve import BND, Integrate, InnerProduct, Parameter
     from mras.live import load_example
     module = load_example("burgers_2d")
@@ -313,15 +313,13 @@ def test_boundary_data_are_imposed_by_boundary_name():
     imposed = GridFunction(fes)
     imposed.Set(inflow, BND, definedon=mesh.Boundaries("inlet"))
     inlet = np.array(fes.GetDofs(mesh.Boundaries("inlet")), dtype=bool)
-    no_slip = np.array(fes.GetDofs(mesh.Boundaries("barrier")), dtype=bool)
-    walls = np.array(fes.GetDofs(mesh.Boundaries("wall")), dtype=bool)
-    assert (walls & ~inlet & np.array(fes.FreeDofs(), dtype=bool)).any()
+    slip = np.array(fes.GetDofs(mesh.Boundaries("wall|barrier")), dtype=bool)
+    assert (slip & ~inlet & np.array(fes.FreeDofs(), dtype=bool)).any()
     want = imposed.vec.FV().NumPy()
     for field in (res.state.gfu, res.state.z):
         got = field.vec.FV().NumPy()
         np.testing.assert_allclose(got[inlet], want[inlet], rtol=1e-12,
                                    atol=1e-12 * np.abs(want).max())
-        assert np.abs(got[no_slip]).max() == 0.0
         diff = field - inflow  # the trace projection's own error, small
         gap = Integrate(InnerProduct(diff, diff), mesh, BND,
                         definedon=mesh.Boundaries("inlet")) ** 0.5
@@ -396,7 +394,7 @@ def test_unknown_scheme_is_refused():
 
 
 def test_boundary_terms_by_name_act_on_that_boundary_only():
-    # 2D Burgers' slip walls: a resistance beta (u . n)(w . n) on the walls,
+    # 2D Burgers' slip surfaces: a resistance beta (u . n)(w . n) on them,
     # not on the outlet -- integrated in the driver's quadrature.
     from ngsolve import BND, CoefficientFunction, InnerProduct, Integrate
     from mras.live import load_example
@@ -410,10 +408,74 @@ def test_boundary_terms_by_name_act_on_that_boundary_only():
     lf.Assemble()
     n = prob.normal
     want = Integrate(module.WALL_RESISTANCE * InnerProduct(u, n) ** 2, prob.mesh,
-                     BND, definedon=prob.mesh.Boundaries("wall"),
+                     BND, definedon=prob.mesh.Boundaries(module.SLIP),
                      order=prob.order)
     got = InnerProduct(lf.vec, u.vec)  # the convection of a constant is zero
     assert got == pytest.approx(want, rel=1e-10)
+
+
+def _wall_field(prob):
+    from ngsolve import CoefficientFunction
+    e = GridFunction(prob.Ufes)
+    e.Set(CoefficientFunction((1.0, 0.5)))  # crosses the walls
+    free = np.fromiter(prob.Ufes.FreeDofs(), dtype=bool)
+    e.vec.FV().NumPy()[~free] = 0.0  # as the data's noise
+    return e
+
+
+def test_a_boundary_part_of_c_takes_the_datum_out_of_that_term():
+    # u_t + (C + B)(u - z) + (f + B z) = g: B acts on u alone, so stiff walls
+    # cannot take a datum's normal trace for a load.
+    from mras.live import load_example
+    from mras.scheme import State
+    module = load_example("burgers_2d")
+    prob = module.PROBLEM(h=0.5, dt=0.05, tend=0.1)
+    prob.model = lambda u, w: None  # the wall term alone
+    cache = prob._prepare()
+    state = State(prob, 0.0)
+    state.z.vec.data = _wall_field(prob).vec
+    state.g = None
+    state.t_next.Set(prob.dt)
+    free = np.fromiter(prob.Ufes.FreeDofs(), dtype=bool)
+    got = prob._state_rhs(state, 1.0, []).FV().NumPy()[free]
+    want = (prob.dt * (cache["Au"] * state.z.vec)).Evaluate().FV().NumPy()[free]
+    np.testing.assert_allclose(got, want, rtol=0,
+                               atol=1e-10 * np.abs(want).max())
+    # ... where f alone has the load: beta times the trace
+    plain = module.PROBLEM(h=0.5, dt=0.05, tend=0.1)
+    plain.model = lambda u, w: None
+    plain.tracking_boundary = lambda u, w: None
+    plain._prepare()
+    other = State(plain, 0.0)
+    other.z.vec.data = state.z.vec
+    other.g = None
+    other.t_next.Set(prob.dt)
+    loaded = plain._state_rhs(other, 1.0, []).FV().NumPy()[free]
+    assert np.abs(loaded - want).max() > 100 * np.abs(got - want).max()
+
+
+def test_the_boundary_part_of_c_only_adds_to_its_form():
+    from ngsolve import InnerProduct
+    from mras.live import load_example
+    prob = load_example("burgers_2d").PROBLEM(h=0.5, dt=0.05, tend=0.1)
+    cache = prob._prepare()
+    e = _wall_field(prob)
+    work = e.vec.CreateVector()
+    work.data = cache["Cu"] * e.vec
+    with_wall = InnerProduct(work, e.vec)
+    work.data = cache["Au"] * e.vec
+    assert with_wall > InnerProduct(work, e.vec) > 0
+
+
+def test_the_joint_solve_and_the_schur_step_share_a_boundary_part_of_c():
+    from mras.live import load_example
+    module = load_example("burgers_2d")
+    schur = module.PROBLEM(h=0.5, dt=0.05, tend=0.15).run_level(0.0, progress=False)
+    joint = module.PROBLEM(h=0.5, dt=0.05, tend=0.15)
+    joint.split = False
+    other = joint.run_level(0.0, progress=False)
+    np.testing.assert_allclose(other.error_q, schur.error_q, rtol=1e-9)
+    np.testing.assert_allclose(other.error_u, schur.error_u, rtol=1e-9)
 
 
 def test_a_measure_on_a_boundary_keeps_its_quadrature():

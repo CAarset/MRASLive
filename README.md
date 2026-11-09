@@ -173,6 +173,7 @@ driver attaches one quadrature to every form):
 | `coupling_adjoint(q, u, w)` | the density of `f_q(q, u)^* w` — required |
 | `source(t)` | `g` at time `t` (a `Parameter`); none by default |
 | `tracking_scale(q)` / `C_scale` | `C = c (-Δ)`, constant by default (`C_scale = 1`) |
+| `tracking_boundary(u, w)` | a boundary part of `C` (bilinear, symmetric, non-negative, q-free; by boundary name as `model_boundary`).  A linear q-free term of `f` declared here too then acts on the state and not on the datum, so the data's noise does not reach the estimator through it (2D Burgers' stiff walls); none by default |
 | `dirichlet(t)` | Dirichlet data by boundary, `{"inlet": value}`: imposed on those boundaries of the Dirichlet part of `U_h`, the rest held at zero; homogeneous by default.  A problem may be driven by boundary data alone (2D Burgers) |
 | `u0`, `q_true`, `initial_guess()` | initial state, true parameter, the example's start of the estimate (0 unless it says otherwise) |
 | `q0` | the initial estimate `qhat_0` (number, coefficient or grid function) set by whoever runs the problem, overriding `initial_guess()`: `run_live(..., q0=...)`, `scripts/run_examples.py --q0 0.3` |
@@ -270,6 +271,33 @@ silently skipped):
 `tests/test_verify.py` pins the documented verdict per example, so a
 silent flip of any rung fails the suite.
 
+Where the data excite the parameter, region by region (`mras/excitation.py`,
+which also holds the operators the checklist's persistent excitation is
+built from): the Gramian accumulated over a whole run, `G(t) = int_0^t B^T
+K^-1 B ds` on `Q_h` (H-whitened), its weakest direction, the conditional
+excitation of each cell `c_K = 1 / (G^-1)_KK` (the least excitation of a
+direction with a unit component on `K`, its neighbours free to compensate),
+and -- for a gradient coupling, without an eigenproblem -- the dose `D_K =
+(1/T) int (1/|K|) int_K |grad z|^2`, which bounds every cell's excitation:
+`lambda_min <= c_K <= G_KK <= D_K` (`tests/test_excitation.py`).
+
+```bash
+.venv/bin/python scripts/pe_maps.py burgers_2d --h 0.1 --tend 100   # G(t), saved every 5
+.venv/bin/python scripts/proceedings_figures.py                      # the 2D Burgers figures
+```
+
+The diagnostics behind the numbers quoted for an example
+(`tests/test_diagnostics.py`):
+
+```bash
+# is the forward model resolved? dt/2, 2h, its range against the boundary data, fluxes
+.venv/bin/python scripts/flow_check.py burgers_2d --tend 50 --marks 20 40 50 --flux inlet outlet
+# where a reconstruction's error sits: cut cells, bands, near named boundaries
+.venv/bin/python scripts/error_regions.py results/burgers_2d/burgers_2d_noise0.h5 --best --near inlet:0.5
+# which term of the model carries the data's noise, from a noisy checkpoint
+.venv/bin/python scripts/noise_terms.py results/burgers_2d/burgers_2d_noise0.01.h5 --times 20 40 80
+```
+
 ## Run configurations (YAML)
 
 Runs are described by `mras.config.RunConfig` (pydantic-validated) and load
@@ -320,7 +348,8 @@ mras/               package: scheme (MRASProblem: the physics hooks, the
                     constants, Krylov to round-off), config (YAML/pydantic),
                     domains, fields, noise, stepper, live (example catalog,
                     run runner, live ngsplot panels), verify (theory
-                    checklist), adjoint, data/pdebench, results, plotting
+                    checklist), excitation (persistent excitation, region
+                    by region), adjoint, data/pdebench, results, plotting
 notebooks/        live seven-panel notebook (Burgers preset)
 examples/         every problem in one folder: one file per example
                   (darcy, fisher, burgers_1d, burgers_1d_dark, burgers_2d, the arrhenius pair,
@@ -329,9 +358,12 @@ examples/         every problem in one folder: one file per example
                   sizes, plus blank_problem.py (template to copy)
 configs/            YAML run configurations
 scripts/            reproduction campaigns, figure assembly, the theory
-                    checklist, the Arrhenius reconstruction demo
+                    checklist, the Arrhenius reconstruction demo, the
+                    excitation maps and the diagnostics (flow_check,
+                    error_regions, noise_terms)
 tests/              pytest suite (domains, fields, noise, scheme, live,
-                    config, plotting, adjoint, arrhenius, verify)
+                    config, plotting, adjoint, arrhenius, verify,
+                    excitation, diagnostics)
 docs/               cleanup plan and cleanup flags, paper-target mapping,
                     deviation report, assumption-by-assumption status
 ```

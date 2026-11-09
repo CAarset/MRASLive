@@ -268,7 +268,8 @@ class Checkpoint:
 # Problem settings that a run may change after construction and a resumed
 # run must take again: the data noise and the safeguards (mras.robust).
 _SETTINGS = ("noise_model", "noise_length", "noise_nu", "smooth_data",
-             "smooth_time", "smooth_space", "discrepancy", "projection",
+             "smooth_time", "smooth_scale", "smooth_space", "discrepancy",
+             "projection",
              "q_bounds", "leakage")
 
 

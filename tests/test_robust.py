@@ -113,9 +113,9 @@ def test_matern_noise_has_the_papers_level_and_follows_the_torch_seed():
     assert not np.array_equal(following, z.vec.FV().NumPy())
     noise.start()
     np.testing.assert_allclose(noise.draw(clean, 0.05).vec.FV().NumPy(),
-                               z.vec.FV().NumPy(), rtol=1e-12)
+                               z.vec.FV().NumPy(), rtol=1e-12, atol=1e-15)
     np.testing.assert_allclose(noise.draw(clean, 0.05).vec.FV().NumPy(),
-                               following, rtol=1e-12)
+                               following, rtol=1e-12, atol=1e-15)
     white, _ = _level(p, GaussianFEMNoise(p.Ufes, seed=3).draw(clean, 0.05, 7),
                       clean)
 
@@ -146,6 +146,33 @@ def test_matern_noise_on_a_velocity_space():
     noise.start()
     np.testing.assert_array_equal(noise.draw(clean, 0.02).vec.FV().NumPy(),
                                   z.vec.FV().NumPy())
+
+
+def test_the_time_filter_leaves_boundary_data_exact():
+    # u = z = h on the boundary (the papers): the filter would lag a ramping
+    # inflow, and the error would leave the homogeneous space.
+    p = build("burgers_2d", h=0.35, dt=0.05, tend=0.1)
+    smoother = Smoother(p, 0.05, tau=1.0, space=False)
+    fixed = ~np.fromiter(p.Ufes.FreeDofs(), dtype=bool)
+    assert fixed.any()
+    z = GridFunction(p.Ufes)
+    for level in (1.0, 2.0, 3.0):
+        z.vec.FV().NumPy()[:] = level
+        out = smoother(z).vec.FV().NumPy()
+    assert np.all(out[fixed] == 3.0)
+    assert np.all(out[~fixed] < 3.0)  # the free dofs lag, as they should
+
+
+def test_the_state_and_noisy_data_share_the_true_boundary_values():
+    p = build("burgers_2d", h=0.35, dt=0.05, tend=0.5)
+    p.smooth_time = 0.5
+    state = p.run_level(0.01, progress=False).state
+    fixed = ~np.fromiter(p.Ufes.FreeDofs(), dtype=bool)
+    exact = p.boundary_data.lift(state.t).vec.FV().NumPy()
+    np.testing.assert_allclose(state.gfu.vec.FV().NumPy()[fixed], exact[fixed],
+                               atol=1e-10)
+    np.testing.assert_allclose(state.z.vec.FV().NumPy()[fixed], exact[fixed],
+                               atol=1e-10)
 
 
 def test_the_time_filter_keeps_a_constant_datum():
