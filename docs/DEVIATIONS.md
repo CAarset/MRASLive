@@ -712,33 +712,97 @@ in time):
   from `H` to `U*`, has no uniform rate at all (the proceedings'
   Remark 1) — with a note on the rate `sigma = 1` would give where (A2)
   is confirmed; `sigma = 0` with `f` nonlinear, no estimate.
-- Constants that are eigenvalues are computed exactly on `Q_h`, `U_h`
-  at the sampled data: the (A2) constant where `f` is affine in `q`
-  (smallest eigenvalue of the pairing matrix), the coercivity of `C`, the
-  persistent-excitation constant.  Dense on `Q_h` up to
-  `DENSE_MAX_DOFS = 5000`, which sets the Arrhenius audit at `h = 0.5`.
+- Three tiers decide what a check can claim (2026-11-10; the module
+  docstring of `mras/verify.py` lists them in full).  *Universal*: every
+  problem, from the hooks it declares anyway (`coupling`, the assembled
+  tracking operator) and its data — refutations and estimates.
+  *Structural*: routes a problem takes or not, detected from the problem,
+  never from its name — `f` affine in `q`; a scalar parameter of a vector
+  state; a Dirichlet part of `U_h`; a constant tracking scale.
+  *Declared*: analytic claims only the author can make — `L`, `c_coe()`,
+  `sigma` — which the checklist tests and never invents.  Nothing in
+  `mras/verify.py` is specific to an example.
+- Constants that are eigenvalues are computed exactly on the discrete
+  spaces at the sampled data: the (A2) constant on `Q_c` where `f` is
+  affine in `q`, the spectrum of `C` relative to the U-norm on `U_h`,
+  `rho_h`, the persistent-excitation constant on `Q_h`.  A discrete
+  infimum over a subspace bounds the continuous one from above, so on its
+  own it refutes or estimates; it confirms only together with an analytic
+  argument (a Dirichlet part and `B >= 0` give `M = c`) or a declared
+  bound.  Dense on `Q_h` and `Q_c` up to `DENSE_MAX_DOFS = 5000` (which
+  sets the Arrhenius audit at `h = 0.5`); on `U_h` dense up to 1500
+  dofs, ARPACK beyond.
 - Infima and suprema over a nonlinear dependence on `q` are only
   sampled, and a sample bounds them from one side: a negative (A2)
   pairing refutes, a positive minimum (and the (A1) remainder maximum)
   is `estimated`.  Confirmation takes an analytic bound the author
   declares — `c_coe()`, `L` — which the checklist evaluates on the data
-  and tests against the pairing on `Q_h`: a declared `C_coe` above it
-  (by more than 1 %) fails.  Potential and Allen–Cahn declare `C_coe =
-  ess inf u^dagger` and `(ess inf u^dagger)^3` (the monotone `q |q|^{2/3}`
-  drops out, paper (30)).
+  and tests against the sampled pairing or remainder: a declared `C_coe`
+  above the pairing on `Q_c` (by more than 1 %) fails, as does a declared
+  `L` below a sampled remainder.  Potential and Allen–Cahn declare
+  `C_coe = ess inf u^dagger` and `(ess inf u^dagger)^3` (the monotone
+  `q |q|^{2/3}` drops out, paper (30)).
+- (A1) (2026-11-10): the remainder is sampled at the problem's own
+  `q^dagger` (`P_h q^dagger`; `q_0` where it is unknown), with `q~ =
+  q^dagger`, over random `d` in `H_h` with `||d||_H <= 3`.  Before, the
+  base point was random too, which made the estimate a supremum over
+  `q^dagger` as well and could not test a declared `L` soundly.  A
+  declared `L` — a constant, or a function `L(||q||_H)` — is now tested
+  against the sampled remainder, and a sample above it fails.  Before,
+  it was accepted untested: `L = 0` declared on an `f` nonlinear in `q`
+  passed.
+- (A2) on `Q_c` (2026-11-10).  The pairing `<f(q, z) - f(p, z), E(q -
+  p)>` needs `q - p` as a test function of the state equation, the
+  paper's `Q ⊆ U`; the parameter spaces the estimator runs on (P0,
+  discontinuous P1) are not in `U`.  Before, the pairing was evaluated on
+  `Q_h`.  For gradient couplings on P0 it was identically zero (`grad q =
+  0` in every cell), and the fallback tested the difference against its
+  `U_h` interpolant, a pairing of two different functions whose negative
+  value is no counterexample.  For 2D Burgers the scalar `Q_h` function
+  could not test the vector state at all: NGSolve raised a shape error,
+  which a catch-all `except` read as "degenerate".  Now the pairing is
+  evaluated on `Q_c`, continuous P1 on the estimator's mesh, zero on the
+  boundaries `U_h` constrains, embedded exactly into `U_h` (L2
+  projection, checked).  For a vector state (structural) the embedding
+  is a choice the papers' scalar examples never had to make; the
+  coordinate embeddings `E_j p = p e_j` are each tested, and the best is
+  reported.  A nonpositive value is a counterexample in `U`.  A positive
+  value without a declared `c_coe()` is now `estimated` (before: `ok`
+  where exact on `Q_h`), as a subspace bounds `C_coe` from above.
+- The (A2) pairs for `f` nonlinear in `q` are localised on <= 3 vertex
+  patches of `Q_c`: full-domain random pairs only measure the
+  datum-weighted *mean* of the monotonicity density and average out
+  sign-changing data.
+- (A3) (2026-11-10) reads the `C = c (-Laplace + B)` the scheme
+  assembles.  `B >= 0`, the contract of `tracking_boundary`, is tested:
+  a negative eigenvalue of `B` relative to the U-norm on `U_h` fails
+  (before: assumed).  `N~` is the largest singular value of `C` relative
+  to the U-norm on `U_h` (before: reported as `c`, wrong wherever `C` has
+  a boundary part, as for 2D Burgers).  Without a Dirichlet part, `M` is
+  the discrete smallest eigenvalue, `estimated`, and fails only where it
+  vanishes; before, (A3) failed whether or not `B` held the constants.
+  With a Dirichlet part and `B >= 0`, `<Cv, v> >= c ||grad v||^2` gives
+  `M = c` analytically.
+- (A3) with `L = 0` is the coercivity of `C` alone (`M~ = M`), whatever
+  (A2) does: Darcy, Fisher and both Burgers examples pass with `M = 1`,
+  as the paper argues for Darcy.  Potential and Allen–Cahn have a
+  norm-dependent `C(||q||)`, coercive for every `c > 0`; the bound `c(r)
+  >= L(r)^2 / (2 C_coe) + M` stays unverifiable without a declared
+  `L(r)`.
+- The decay rate (2026-11-10), a departure from the papers.  KN21 (22)
+  gives `1/2 E' + (C_coe/2) ||eps_q||_H^2 + M ||eps_u||_U^2 <= 0`, and with
+  `||v||_H <= C_U->H ||v||_U` the rate `min{C_coe, 2 M / C_U->H^2}`.  KN21
+  (23), the AMMC paper's Proposition 2.3 and the proceedings print `2 M
+  C_U->H` with `C_U->H` the norm of the embedding.  That is implied only
+  where `C_U->H <= 1`, as for the full H1 norm, and not for `||grad .||`
+  on a domain of Poincaré constant below 1.  The convergence row reports
+  `min{C_coe, 2 M rho_h}`, `rho_h` the smallest eigenvalue of the U-norm
+  relative to `H` on `U_h` (`1/C_U->H^2 <= rho_h`).
 - The U-norm is `||grad v||` where `U_h` has a Dirichlet part (a norm by
   Poincare-Friedrichs, the paper's choice) and the full H1 norm where it
   has none; (A1) measures the remainder in its dual (before:
   `mass + dt * stiffness`), (A3) the coercivity of `C` in it, the
   persistent excitation the sensitivity in its dual.
-- (A3) with `L = 0` is the coercivity of `C` alone (`M~ = M`), whatever
-  (A2) does: Darcy, Fisher and both Burgers examples pass with `M = 1`,
-  as the paper argues for Darcy.  Without a Dirichlet part `C = c
-  (-Laplace)` vanishes on the constants and (A3) fails for any `c` (so
-  did potential and Allen–Cahn before they prescribed the boundary
-  state); for their norm-dependent `C(||q||)` it is coercive for every
-  `c > 0`, and the bound `c(r) >= L(r)^2 / (2 C_coe) + M` stays
-  unverifiable without a declared `L(r)`.
 - Persistent excitation: the window mean of `||f_q(q~, z) p||_U*^2`
   against `gamma ||p||_H^2`, on two windows of half the horizon (8 data
   instants); `gamma_h` is the smallest eigenvalue of the windowed Gramian
@@ -758,14 +822,6 @@ in time):
   else QUICK, data sampled at 50 instants up to the longest `t_end`; the
   `pe` column), and `scripts/checklist.py --after results/summary.json`
   for finished runs.
-- The (A2) pair probe localises test pairs on <= 3 cells: full-domain
-  random pairs only measure the datum-weighted *mean* of the
-  monotonicity density and average out sign-changing data.
-- Gradient couplings (Darcy, Fisher) are exactly degenerate on P0
-  (`grad q = 0` a.e.); the probe's H1-relaxed lift is sign-indefinite
-  and reported `fail` with the Remark 4.2 note.  On Burgers' P1 `Q_h`
-  the elementwise pairing exists and its exact smallest eigenvalue is
-  negative (`fail`, same Remark).
 
 `scripts/checklist.py` runs the registry and writes
 `results/checklist.md`; `tests/test_verify.py` pins the documented

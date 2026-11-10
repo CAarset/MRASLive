@@ -18,6 +18,8 @@ dependencies = [
     "ngsplot @ git+https://github.com/CAarset/ngsplot.git",
     "ngsrng @ git+https://github.com/CAarset/ngsrng.git",
     "numpy",
+    "scipy",          # the checklist's eigenproblems (mras.verify)
+    "threadpoolctl",  # ... with the BLAS threads they use capped
     "matplotlib",
     "pydantic>=2",
     "PyYAML",

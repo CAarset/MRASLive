@@ -7,13 +7,15 @@ The expected verdicts are the audit results of the paper's examples:
 
 * sigma = 0 family (Darcy, Fisher, Burgers 1D): adjoint pairing at
   machine precision, f affine in q, (A2) FAILS as a claim (gradient
-  coupling: degenerate on P0, sign-indefinite relaxation; on the P1 Q_h
-  of Burgers 1D the exact pairing is indefinite; the paper does not claim
-  it, Remark 4.2); L = 0, so (A3) is C's coercivity alone, M~ = M = 1;
-* Burgers 2D (vector) shares that family; the vector state is probed
-  along each velocity component; its inflow descends from the start
-  (0.44 -> 0.34 by its audit horizon t = 1, from qhat_0 = 3/4), and the
-  Burgers 1D beams descend (1 -> 0.81 by t = 1);
+  coupling: the exact pairing on Q_c, continuous P1 in U, has a negative
+  eigenvalue -- a counterexample, as the paper's Remark 4.2 expects; on
+  the P0 parameter space the pairing vanishes and decides nothing);
+  L = 0, so (A3) is C's coercivity alone, M~ = M = 1;
+* Burgers 2D (vector) shares that family; (A2) is tested along each
+  coordinate embedding p -> p e_j and fails for both; its C carries the
+  slip walls' boundary part, B >= 0, so M = 1 and N~ > 1; its inflow
+  descends from the start (0.44 -> 0.34 by its audit horizon t = 1, from
+  qhat_0 = 3/4), and the Burgers 1D beams descend (1 -> 0.81 by t = 1);
 * persistent excitation over the audit horizon: positive for Darcy,
   Fisher, the Arrhenius pair, potential and Allen-Cahn; zero to the
   accuracy of the solve for both Burgers examples, whose data up to t = 1
@@ -42,15 +44,18 @@ import re
 from types import SimpleNamespace
 
 import pytest
-from ngsolve import IfPos, Integrate, x, y
+from ngsolve import (H1, L2, GridFunction, IfPos, InnerProduct, Integrate,
+                     grad, x, y)
+from ngsolve.meshes import MakeStructured2DMesh
 
-from mras.domains import darcy
+from mras.domains import Domains, darcy
 from mras.live import load_example
 from mras.scheme import MRASProblem, TheorySpecError
 from mras.verify import (ESTIMATED, FAIL, OK, UNVERIFIABLE, Check,
                          _datum_array, _datum_cells_mean, _datum_samples,
                          _strong_gap,
-                         check_a2, check_convergence_route, check_example,
+                         check_a1, check_a2, check_a3,
+                         check_convergence_route, check_example,
                          check_pe_after, persistent_excitation, run_checks)
 
 # The examples live in examples/ and are loaded by the runner, not imported.
@@ -93,16 +98,24 @@ EXPECTED = {
 }
 
 
-def _by_prefix(checks):
-    """Each row under its key; "Gramian" before "persistent", which both
-    PE rows contain."""
+# Where the reason is the point: fragments a verdict's detail must carry.
+DETAILS = {
+    "burgers_2d": {"(A2)": "for every coordinate embedding",
+                   "(A3)": "-Laplace + B"},
+    "darcy": {"(A2)": "counterexample in U"},
+}
+
+
+def _by_prefix(checks, field="status"):
+    """Each row's status (or ``field``) under its key; "Gramian" before
+    "persistent", which both PE rows contain."""
     keys = sorted(EXPECTED["darcy"], key=lambda k: k != "Gramian")
     out = {}
     for c in checks:
         key = next((k for k in keys if c.name.startswith(k) or k in c.name),
                    None)
         if key is not None:
-            out[key] = c.status
+            out[key] = getattr(c, field)
     return out
 
 
@@ -126,6 +139,9 @@ def test_checklist_verdicts_match_the_documented_audit(name):
     assert set(got) == set(expected), (name, [c.name for c in checks])
     bad = {k: (v, got[k]) for k, v in expected.items() if got[k] != v}
     assert not bad, (name, [(c.name, c.status, c.detail) for c in checks])
+    details = _by_prefix(checks, "detail")
+    for key, fragment in DETAILS.get(name, {}).items():
+        assert fragment in details[key], (name, key, details[key])
 
 
 class QuadraticRateProblem(_ArrheniusBase):
@@ -300,7 +316,125 @@ def test_a2_declared_bound_above_the_exact_pairing_fails():
     got = _a2(Overclaimed, affine=True)
     assert got.status == FAIL and "the bound is wrong" in got.detail, \
         got.detail
-    assert "exact on Q_h" in got.detail
+    assert "exact on Q_c" in got.detail
+
+
+class SquaredQDeclared(SquaredQProblem):
+    """q^2 r(z) with an L declared: the sampled remainder d^2 r(z) at
+    q~ = q^dagger tests it."""
+
+    L = 0.0
+
+
+def test_a1_declared_L_is_tested_against_the_sampled_remainder():
+    """A declared L is a claim: a sampled remainder above it refutes it
+    (here L = 0 on an f quadratic in q); one it covers stands."""
+    p = SquaredQDeclared(h=1.2, dt=0.05, tend=1.5, k_q=0)
+    samples = _datum_samples(p)
+    got = check_a1(p, samples)
+    assert got.status == FAIL and "refuted" in got.detail, got.detail
+
+    p.L = 1e6
+    got = check_a1(p, samples)
+    assert got.status == OK and "not contradicted" in got.detail, got.detail
+    assert got.value == 1e6
+
+    p.L = lambda r: 1e6 * (1 + r)  # L(||q||_H), increasing
+    got = check_a1(p, samples)
+    assert got.status == OK and "function" in got.detail, got.detail
+
+
+def _square(dirichlet, cells=6, order_u=2):
+    mesh = MakeStructured2DMesh(quads=False, nx=cells, ny=cells)
+    fixed = {"dirichlet": dirichlet} if dirichlet else {}
+    return Domains(mesh, H1(mesh, order=order_u, **fixed), L2(mesh, order=0))
+
+
+class GradientCoupling(MRASProblem):
+    """f(q, u) = -div(q grad u) on the unit square, Q_h = P0: the
+    elementwise pairing int p grad z . grad p vanishes on P0, which says
+    nothing about (A2).  No data path: the checks below take their data
+    as arguments."""
+
+    name = "gradient_coupling"
+    sigma = 0.0
+
+    def __init__(self, dirichlet="bottom|right|top|left"):
+        super().__init__(_square(dirichlet))
+
+    def coupling(self, q, u, w):
+        return q * InnerProduct(grad(u), grad(w))
+
+    def coupling_adjoint(self, q, u, w):
+        return InnerProduct(grad(u), grad(w))
+
+
+def test_a2_gradient_coupling_is_decided_on_a_conforming_space():
+    """For p in H^1_0, int p grad z . grad p = -1/2 int (Laplace z) p^2: (A2)
+    holds with C_coe = 1 for z = 1 - |x|^2/2 (-Laplace z = 2) and fails for
+    its negative.  Q_c, continuous P1 zero where U_h is, sees both exactly,
+    where the P0 parameter space saw a vanishing pairing for either."""
+    p = GradientCoupling()
+    for sign, status in ((1.0, ESTIMATED), (-1.0, FAIL)):
+        z = GridFunction(p.Ufes)
+        z.Set(sign * (1 - (x * x + y * y) / 2))
+        got = check_a2(p, [z], affine=True)
+        assert got.status == status, got.detail
+        assert "exact on Q_c" in got.detail, got.detail
+        if status == ESTIMATED:
+            assert abs(got.value - 1.0) < 1e-8, got.detail
+            assert "from above only" in got.detail, got.detail
+        else:
+            assert "counterexample in U" in got.detail, got.detail
+
+
+class BoundaryTracking(GradientCoupling):
+    """A boundary part B = beta (u w) of the tracking operator C."""
+
+    beta = 1.0
+
+    def tracking_boundary(self, u, w):
+        return self.beta * u * w
+
+
+def _a3(beta, dirichlet):
+    cls = type("Tracked", (BoundaryTracking,), {"beta": beta})
+    return check_a3(cls(dirichlet), None, affine=True)
+
+
+def test_a3_reads_the_assembled_tracking_operator():
+    """(A3) on the C the scheme assembles, -Laplace + B: a negative B is
+    refuted on U_h; a positive one leaves M = c and raises N~ above c;
+    without a Dirichlet part -Laplace alone is not coercive, but a B that
+    holds the constants is, by the discrete eigenvalue (estimated)."""
+    negative = _a3(-1.0, "left")
+    assert negative.status == FAIL, negative.detail
+    assert "negative on U_h" in negative.detail, negative.detail
+
+    stiff = _a3(100.0, "left")
+    assert stiff.status == OK and stiff.value == 1.0, stiff.detail
+    top = float(re.search(r"N~ >= ([0-9.eE+-]+)", stiff.detail).group(1))
+    assert top > 2.0, stiff.detail
+    assert stiff.extra["rho"] > 0, stiff.extra
+
+    bare = check_a3(GradientCoupling(dirichlet=None), None, affine=True)
+    assert bare.status == FAIL and "not coercive" in bare.detail, bare.detail
+
+    held = _a3(1.0, None)
+    assert held.status == ESTIMATED and 0 < held.value < 1, held.detail
+    assert abs(held.extra["rho"] - 1.0) < 1e-8, held.extra  # H1 norm vs L2
+
+
+def test_decay_rate_uses_the_poincare_constant():
+    """KN21 (22) with ||v||_H <= C_U->H ||v||_U gives the rate
+    min{C_coe, 2 M / C_U->H^2} = min{C_coe, 2 M rho}: here 0.5, where the
+    papers' 2 M C_U->H would give C_coe = 0.75."""
+    got = check_convergence_route(
+        SimpleNamespace(sigma=1, C_scale=None), True,
+        Check("(A1)", OK, "", 0.0), Check("(A2)", OK, "", 0.75),
+        Check("(A3)", OK, "", 1.0, {"rho": 0.25}),
+        Check("persistent excitation", OK, "", 1e-3))
+    assert got.status == OK and "2 M rho_h} = 0.5 " in got.detail, got.detail
 
 
 def test_pe_weakest_direction_is_where_the_data_do_not_reach():

@@ -243,6 +243,36 @@ def test_the_movie_paces_itself_between_four_and_ten_seconds(stored_run,
     assert num / den == pytest.approx(steps / 4.0, rel=1e-3)
 
 
+def test_the_pair_layout_plays_as_an_animated_webp(stored_run, tmp_path):
+    """The short picture (datum beside estimate, ``layout="pair"``) as an
+    animated WebP at 60 frames a second: a stored step every 1/60 s, to the
+    millisecond (libwebp merges identical consecutive frames, adding their
+    durations); unknown layouts and formats are refused before ffmpeg."""
+    from PIL import Image
+    steps = len(load(stored_run).steps)
+    path = render_movie(stored_run, tmp_path / "pair.webp", fps=60,
+                        workers=1, layout="pair", panel_width=120)
+    with Image.open(path) as image:
+        assert image.format == "WEBP" and 1 < image.n_frames <= steps
+        durations = []
+        for k in range(image.n_frames):
+            image.seek(k)
+            image.load()  # the frame's duration is read with it
+            durations.append(image.info["duration"])
+    assert min(durations) >= 16, durations  # never under 1/60 s
+    assert abs(sum(durations) - steps * 1000 / 60) <= steps, durations
+    # until: the stored steps up to that time, and no further
+    stored = load(stored_run)
+    shown = sum(float(t) <= 0.5 + 1e-12 for t in stored.times)
+    frames = _probe(render_movie(stored_run, tmp_path / "until.mp4", fps=60,
+                                 workers=1, layout="pair", until=0.5))[2]
+    assert frames == shown < steps
+    with pytest.raises(ValueError, match="layout"):
+        render_movie(stored_run, tmp_path / "x.mp4", layout="nope", workers=1)
+    with pytest.raises(ValueError, match="mp4, .webp or .gif"):
+        render_movie(stored_run, tmp_path / "x.avi", workers=1)
+
+
 def test_parallel_rendering_paints_the_same_frames(stored_run, tmp_path):
     serial = _probe(render_movie(stored_run, tmp_path / "1.mp4", workers=1))
     parallel = _probe(render_movie(stored_run, tmp_path / "2.mp4", workers=2))

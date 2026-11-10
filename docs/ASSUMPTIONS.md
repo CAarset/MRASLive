@@ -57,7 +57,10 @@ computable). The model `f : Q × U → U*` and its partial `q`-derivative act as
   (A1) constant through `L²/(2 C_coe)`; `M` buys the stability margin.
 
 * **Proposition 2.3** — under (A1)–(A3) the joint error decays exponentially,
-  rate `C′ = min{ C_coe, 2 M̃ / C_{U→H} }` (plus persistent-excitation terms):
+  rate `C′ = min{ C_coe, 2 M C_{U→H} }` as printed, `C_{U→H}` the norm of the
+  embedding; the energy estimate behind it (KN21 (22)) gives
+  `min{ C_coe, 2 M / C_{U→H}² }`, which the checklist reports
+  (docs/DEVIATIONS.md, 2026-11-10) (plus persistent-excitation terms):
   (A2) and (A3) *both* enter the convergence rate, (A1) only through M̃.
 
 * **σ ∈ {0,1}** (paper eq. (4)): `σ = 0` iff `q ↦ f(q,z)` is linear, `σ = 1`
@@ -343,12 +346,12 @@ accompanying (conditional) justification, rather than an unexplained red row.
 | rung / piece | paper | repo today | gap |
 |---|---|---|---|
 | σ switch | 0 for f linear in q, 1 otherwise | `sigma` attribute, the author's choice; `check_convergence_route` reports what it gives (σ = 1: the decay estimate from (A1)–(A3); σ = 0, f affine: convergence through PE only; σ = 0, f nonlinear: none) | — |
-| L = 0 (R0) | implicit | `_probe_affine` chord-gap probe (8 draws, < 1e-9 ⇒ affine ⇒ `L = 0` exact); declared `L = 0` upgraded to analytic OK | — |
+| L = 0 (R0) | implicit | `_probe_affine` chord-gap probe (8 draws, < 1e-9 ⇒ affine ⇒ `L = 0` exact); a declared `L` is then unused | — |
 | L closed form (R1) | rows 4–5 done by hand | manual | Nemytskii template + monotonicity-by-construction + κ provenance |
-| L estimated (R2) | — | `_estimate_lipschitz`: radius × draw grid, K-dual norm ⇒ ESTIMATED + construction-time-independent `UserWarning`; the estimate never feeds (A3) | — |
+| L estimated (R2) | — | `_remainder_samples` at `q~ = q^dagger`: radius × draw grid, K-dual norm ⇒ ESTIMATED + `UserWarning`; a declared `L` (constant or `L(r)`) is tested against it and fails below a sample; the estimate never feeds (A3) | — |
 | prompt (R3) | — | UNVERIFIABLE (reads "cannot say") | new NEEDS_INPUT status + three-branch prompt |
-| (A2) witness | rows 4–5 `z̲`; 6–7 `ess inf r(z̲)` | `c_coe()` analytic hook + localised patch probe with U_h-view relaxation; FAIL wording carries the Remark-4.2 context | — |
-| (A3) certificate (K0) | tautological C | K1 done: `_lambda1` CG-preconditioned inverse iteration (local Riesz) on `C = C_scale*(-Delta)`; norm-dependent C ⇒ honest UNVERIFIABLE | form-equality certificate (K0); constructive default (K2) |
+| (A2) witness | rows 4–5 `z̲`; 6–7 `ess inf r(z̲)` | `c_coe()` analytic hook, tested against the pairing on `Q_c` (continuous P1 in `U`; coordinate embeddings for a vector state): exact smallest eigenvalue for `f` affine in `q`, localised patch pairs otherwise | — |
+| (A3) certificate (K0) | tautological C | the assembled `C = c (-Delta + B)`: `B >= 0` tested, extreme eigenvalues relative to the U-norm on `U_h` (`M` from above, `N~` from below), `rho_h`; Dirichlet part + `B >= 0` ⇒ `M = c` analytically; norm-dependent C ⇒ honest UNVERIFIABLE | constructive default (K2) |
 | adjointness pre-verification | "verified assumptions" style | `check_pairing`: 100-draw declared-pair precheck against the numerical q-derivative of `coupling`, before any solving; construction warns once when `coupling_adjoint` is missing | — |
 
 ESTIMATED (measured, extrapolated) is live in the ladder, strictly ordered

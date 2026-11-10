@@ -73,7 +73,11 @@ Error system (19)–(21) with `r = u − u*`, `e = q − q*`, tested by `(r, e)`
 (the coupling terms cancel). (A3) bounds the second term below, (A2) and
 Young the third, (A4) absorbs `L²/(2C_coe)`: (22)
 `½ E' + (C_coe/2)‖e‖²_H + M‖r‖²_U ≤ 0`, hence the energy decreases and
-(23) `E(t) ≤ exp(−min{C_coe, 2M C_{U→H}} t) E(0)`. Proposition 2.1:
+(23) `E(t) ≤ exp(−min{C_coe, 2M C_{U→H}} t) E(0)`, as printed, with
+`C_{U→H}` "the norm of the continuous embedding". From (22) and
+`‖r‖_H ≤ C_{U→H}‖r‖_U` the rate is `min{C_coe, 2M / C_{U→H}²}`; the printed
+one follows from it only where `C_{U→H} ≤ 1` (docs/DEVIATIONS.md,
+2026-11-10; the checklist reports `min{C_coe, 2M ρ_h}`). Proposition 2.1:
 regularity (i), the integrated bound (ii), the exponential rate (iii). The
 `σ`-term is what produces `C_coe ‖e‖²`: without it (σ = 0) the identity
 dissipates `r` only.

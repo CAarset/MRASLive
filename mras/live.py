@@ -290,31 +290,12 @@ class Panels:
         self.err_u = GridFunction(Ufes)
         self.z = GridFunction(Ufes)
         self.qhat = GridFunction(Qfes)
-        # q and its error are drawn exactly, not projected onto Q_h: the
-        # projection over- and undershoots q near steep layers, which would
-        # stretch the fixed range and paint a fitting error as an estimate.
-        self.q_true = prob.q_true
-        if self.q_true is not None and not isinstance(self.q_true,
-                                                      CoefficientFunction):
-            self.q_true = CoefficientFunction(self.q_true)
         self.floor = prob.q_floor()
         # The error panel evaluates q where the estimate lives; the q panel
-        # paints it on a mesh that follows its jumps -- its own, or the
-        # estimator's when that does (a floor of zero).
-        self.err_q = None if self.q_true is None else self.qhat - self.q_true
-        own = prob.q_domains
-        if self.q_true is not None and own is not None:
-            if not (isinstance(self.q_true, GridFunction)
-                    and self.q_true.space.mesh is own.mesh):
-                shown = GridFunction(L2(own.mesh, order=0))
-                shown.Set(self.q_true)
-                self.q_true = shown
-        elif self.floor is not None and self.floor < 1e-9:
-            # q lies in Q_h (a mesh that follows its jumps): its projection
-            # is q itself, painted element by element.  Evaluated pointwise,
-            # q would be ambiguous at the vertices on its jumps, and paint
-            # each element there with a neighbour's value.
-            self.q_true = prob.project_q(self.q_true)
+        # paints it as _shown_truth says.
+        self.err_q = (None if prob.q_true is None
+                      else self.qhat - _as_coefficient(prob.q_true))
+        self.q_true = _shown_truth(prob, self.floor)
         self._q_span = (None if self.q_true is None else
                         _padded(*_payload_range(self._payload(self.q_true))))
         self._area = Integrate(CoefficientFunction(1.0), prob.mesh)
@@ -608,6 +589,105 @@ class Panels:
         return buffer.getvalue()
 
 
+class Pair:
+    """The short picture: the datum beside the estimate, nothing else.
+
+    The flow the data show -- the datum z, painted as its length for a
+    vector state -- and the estimate qhat side by side, titled with the time
+    and the relative error.  Each panel keeps one colour range for a whole
+    movie: the datum's from its extremes over all frames (from zero for a
+    length), the estimate's q's padded range, as in :class:`Panels`, or its
+    own extremes over all frames where q is unknown.  No colourbars: the
+    picture is for showing a run, the full figure for reading one.
+
+    The movie (:mod:`mras.movie`, ``layout="pair"``) drives it as it drives
+    :class:`Panels`: :meth:`fill`, :meth:`extremes`, :meth:`frame_ranges`,
+    :meth:`job`, :meth:`paint`.  ``panel_width`` is each panel's width in
+    pixels; its height follows from the domain's box.
+    """
+
+    def __init__(self, prob, panel_width=260, horizon=None):
+        self.prob = prob
+        self.horizon = horizon
+        self.z = GridFunction(prob.Ufes)
+        self.qhat = GridFunction(prob.Qfes)
+        self.vector = self.z.dim > 1
+        self._datum = Norm(self.z) if self.vector else self.z
+        truth = _shown_truth(prob, prob.q_floor())
+        self._q_span = (None if truth is None else _padded(*_payload_range(
+            render_data(truth) if isinstance(truth, GridFunction)
+            else render_data(truth, prob.mesh))))
+        self._view = frame(render_data(self._datum, prob.mesh),
+                           width=panel_width, height=None, fit="box")
+        w, h = self._view.width, self._view.height
+        gap, top, title, bottom = 18, 40, 24, 8
+        width, height = 2 * w + 3 * gap, top + title + h + bottom
+        self.figure = Figure(figsize=(width / 100, height / 100), dpi=100)
+        FigureCanvasAgg(self.figure)
+        self._axes = []
+        label = r"flow speed $|z|$" if self.vector else r"datum $z$"
+        for col, name in enumerate((label, r"reconstruction $\hat q$")):
+            x, y = gap + col * (w + gap), top + title
+            ax = self.figure.add_axes((x / width, 1 - (y + h) / height,
+                                       w / width, h / height))
+            ax.set_title(name, fontsize=11)
+            self._axes.append(ax)
+        self._title = self.figure.suptitle("", fontsize=11, y=0.985)
+
+    def fill(self, t, u, z, q):
+        """Put a stored state into the picture (u is not shown)."""
+        self.z.vec.FV().NumPy()[:] = z
+        self.qhat.vec.FV().NumPy()[:] = q
+
+    def extremes(self):
+        """The two payloads, and the extremes of each panel's field."""
+        payloads = [render_data(self._datum, self.prob.mesh),
+                    render_data(self.qhat)]
+        return payloads, {"datum": _payload_range(payloads[0]),
+                          "estimate": _payload_range(payloads[1])}
+
+    def frame_ranges(self, times, seen):
+        """One colour range per panel for every frame of a movie, from the
+        extremes ``seen`` in all of them."""
+        lo = min(s["datum"][0] for s in seen)
+        hi = max(s["datum"][1] for s in seen)
+        ranges = {"datum": _range_kwargs(0.0 if self.vector else lo, hi)}
+        if self._q_span is not None:
+            ranges["estimate"] = _range_kwargs(*self._q_span)
+        else:
+            ranges["estimate"] = _range_kwargs(*_padded(
+                min(s["estimate"][0] for s in seen),
+                max(s["estimate"][1] for s in seen)))
+        return [ranges] * len(times)
+
+    def job(self, t, history, offset, ranges=None, payloads=None):
+        """What :meth:`paint` paints for the filled state at time t, on the
+        ``ranges`` of :meth:`frame_ranges` (a still without them paints on
+        this state's own)."""
+        if payloads is None:
+            payloads, seen = self.extremes()
+            if ranges is None:
+                ranges = self.frame_ranges([t], [seen])[0]
+        title = f"t = {t:.1f}"
+        history = np.asarray(history)
+        if self._q_span is not None and offset == 0 and len(history):
+            title += f"      error {100 * history[-1]:.1f} %"
+        return {"t": t, "title": title,
+                "panels": [(ax, payload, dict(ranges[kind])) for ax, payload,
+                           kind in zip(self._axes, payloads,
+                                       ("datum", "estimate"))]}
+
+    def paint(self, job):
+        """Paint a job into the figure; return it as PNG bytes."""
+        for ax, payload, kw in job["panels"]:
+            Plot(payload, ax=ax, view=self._view, wireframe=False, **kw)
+            ax.set_axis_off()
+        self._title.set_text(job["title"])
+        buffer = BytesIO()
+        self.figure.savefig(buffer, format="png")
+        return buffer.getvalue()
+
+
 class LivePanels(Panels):
     """The figure, following a run: the run's on_step hook.
 
@@ -851,6 +931,37 @@ class _PinnedRange:
 
 def _payload_range(payload):
     return float(payload["funcmin"]), float(payload["funcmax"])
+
+
+def _as_coefficient(value):
+    return (value if isinstance(value, CoefficientFunction)
+            else CoefficientFunction(value))
+
+
+def _shown_truth(prob, floor):
+    """q^dagger as the pictures paint it, or None where it is unknown.
+
+    Exactly, not projected onto Q_h: the projection over- and undershoots q
+    near steep layers, which would stretch the fixed range and paint a
+    fitting error as an estimate.  On a mesh that follows its jumps -- its
+    own (``q_domains``), or the estimator's where that does (a ``floor`` of
+    zero: q lies in Q_h, so its projection is q itself, painted element by
+    element; evaluated pointwise, q would be ambiguous at the vertices on
+    its jumps and paint each element there with a neighbour's value).
+    """
+    if prob.q_true is None:
+        return None
+    q = _as_coefficient(prob.q_true)
+    own = prob.q_domains
+    if own is not None:
+        if isinstance(q, GridFunction) and q.space.mesh is own.mesh:
+            return q
+        shown = GridFunction(L2(own.mesh, order=0))
+        shown.Set(q)
+        return shown
+    if floor is not None and floor < 1e-9:
+        return prob.project_q(q)
+    return q
 
 
 def _padded(lo, hi):

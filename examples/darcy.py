@@ -65,9 +65,12 @@ class DarcyProblem(MRASProblem):
     name = "darcy"
     sigma = 0.0
     L = 0.0
-    # (A2) holds only formally: the pairing int q grad(z) grad(q) with q in
-    # the P0 parameter space is 0 a.e., and its smoothed relaxation
-    # -1/2 int q^2 Laplace z is sign-indefinite -- see mras/verify.py.
+    # (A2) fails: on H^1_0 the pairing int p grad(z) . grad(p) is
+    # -1/2 int p^2 Laplace z, negative for p concentrated where the datum's
+    # Laplacian (with the jumps of its normal derivative) is positive; the
+    # checklist finds the counterexample on the continuous P1 space Q_c
+    # (on the P0 parameter space the pairing is 0, which decides nothing)
+    # -- see mras/verify.py.
 
     def __init__(self, h=1 / 128, dt=1e-3, tend=5.0, k_u=3, k_q=0, sample=0,
                  hdf5=None, seed=0, fitted=False):
