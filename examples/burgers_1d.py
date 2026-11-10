@@ -57,7 +57,8 @@ HOLE_R = 0.27
 # hole, alternate beams in opposite senses; beams cross freely.  Its pulse,
 # its width and its turn run at periods of their own, drawn from
 # P_n = 24 * 2**frac(n PHI) (25 - 39 time units, at least 1.4 apart,
-# pairwise incommensurate; the turns at twice that), all stretched by
+# pairwise incommensurate; the turns at twice that), except the middle
+# beam's turn, ``TURNS`` (two full turns by t = 100), all stretched by
 # ``period_scale``, so the source never repeats and, in a movie at ~12 time
 # units a second, the beams sweep smoothly.  What identifies q is the
 # variety of spatial response patterns the forcing excites, everywhere:
@@ -68,6 +69,7 @@ PHI = (1 + 5**0.5) / 3
 WIDTH, WIDTH_WOBBLE = 15.0, 5.0   # full beam width, degrees
 EDGE = 4                          # flatness of the beam's angular profile
 AMPLITUDE = 30.0                  # peak heating
+TURNS = {1: 50.0}                 # turn periods set by hand: the middle beam's
 PULSE_FLOOR = 0.25                # the light's minimum, as a fraction of its peak
 
 
@@ -104,8 +106,9 @@ def SOURCE(t, beams=(0, 1, 2), signed=False, period_scale=1.0):
     g = 0
     for k in beams:
         dx, dy = x - HOLES[k], y - HEIGHT / 2
-        heading = ((-1) ** k * 2 * pi * t / (2 * period(3 * k + 3))
-                   + 2 * pi * k / 3)
+        turn = (period_scale * TURNS[k] if k in TURNS
+                else 2 * period(3 * k + 3))
+        heading = (-1) ** k * 2 * pi * t / turn + 2 * pi * k / 3
         along = dx * cos(heading) + dy * sin(heading)
         across = -dx * sin(heading) + dy * cos(heading)
         half = pi / 360 * (WIDTH + WIDTH_WOBBLE

@@ -1,13 +1,17 @@
 #!/usr/bin/env python
 """Figures of the 2D Burgers example for the proceedings (proceedings/figures).
 
-    .venv/bin/python scripts/proceedings_figures.py [reconstruction] [dose] [gramian]
+    .venv/bin/python scripts/proceedings_figures.py [reconstruction] [snapshots] [dose]
+        [gramian] [excitation]
 
 reconstruction  q^dagger, the best-found estimate at each noise level and
                 its error, and the error histories: from the production
                 checkpoints in results/burgers_2d (the best-found estimate is
                 the saved iterate of smallest error, an oracle choice that
                 reads q^dagger: the runs had no stopping rule for noise).
+snapshots       the clean run at its start, its end and three times between,
+                equally spaced (to the nearest step): the datum's speed |z|
+                above the estimate q.
 dose            the dose D_K(T) = (1/T) int_0^T (1/|K|) int_K |grad z|^2 dx dt
                 of the clean datum on the production mesh, an upper bound of
                 every cell's excitation, and its sublevel set.
@@ -174,6 +178,61 @@ def reconstruction():
                                              "error_min"), row))
                                    for row in errors]}, indent=1))
     print("reconstruction:", errors, "floor", floor, flush=True)
+
+
+# -- snapshots --------------------------------------------------------------
+SNAPSHOTS = 5        # the initial and final iterates and three between
+
+
+def speed_max(mesh, fields):
+    """The largest speed |z| of ``fields`` at the mesh's vertices."""
+    points = np.array([v.point for v in mesh.vertices])
+    where = mesh(points[:, 0], points[:, 1])
+    return max(float(np.max(Norm(z)(where))) for z in fields)
+
+
+def snapshots():
+    """The clean run at the steps nearest to equal fractions of its length:
+    the datum's speed |z| above, the estimate q below, each row on one
+    colour scale (q on q^dagger's, as in the reconstruction figure)."""
+    p = build("burgers_2d")
+    mesh = p.mesh
+    h5 = checkpoint(0.0)
+    steps = h5["trajectory/step"][:]
+    err = h5["history/error_q"][:]
+    last = int(steps[-1])
+    picks = [int(np.searchsorted(steps, last * k // (SNAPSHOTS - 1)))
+             for k in range(SNAPSHOTS)]
+    zs, qs = [], []
+    for k in picks:
+        z = GridFunction(p.Ufes)
+        z.vec.FV().NumPy()[:] = h5["trajectory/z"][k]
+        q = GridFunction(p.Qfes)
+        q.vec.FV().NumPy()[:] = h5["trajectory/q"][k]
+        zs.append(z)
+        qs.append(q)
+    top = speed_max(mesh, zs)
+    view = view_of(render_data(qs[0]))
+    fig, axes = plt.subplots(2, SNAPSHOTS, figsize=(6.3, 4.3))
+    fig.subplots_adjust(left=0.01, right=0.9, wspace=0.06, hspace=0.16)
+    rows = []
+    for col, (k, z, q) in enumerate(zip(picks, zs, qs)):
+        t, step = float(h5["trajectory/t"][k]), int(steps[k])
+        image_z = paint(axes[0, col], Norm(z), mesh, view, autoscale=False,
+                        vmin=0.0, vmax=top)
+        axes[0, col].set_title(rf"$t={t:g}$")
+        image_q = paint(axes[1, col], q, None, view, autoscale=False,
+                        vmin=Q_RANGE[0], vmax=Q_RANGE[1])
+        axes[1, col].set_title(rf"error {100 * err[step]:.1f}$\%$")
+        rows.append({"t": t, "step": step, "error": float(err[step])})
+    bar(fig, axes[0, :], image_z, r"$|z|$")
+    bar(fig, axes[1, :], image_q, r"$q$")
+    fig.savefig(FIGURES / "burgers2d_snapshots.pdf", dpi=400,
+                bbox_inches="tight")
+    plt.close(fig)
+    (FIGURES / "burgers2d_snapshots.json").write_text(json.dumps(
+        {"speed_max": top, "frames": rows}, indent=1))
+    print("snapshots:", rows, "speed max", top, flush=True)
 
 
 # -- dose -------------------------------------------------------------------
@@ -372,6 +431,8 @@ if __name__ == "__main__":
     jobs = sys.argv[1:] or ["reconstruction", "dose"]
     if "reconstruction" in jobs:
         reconstruction()
+    if "snapshots" in jobs:
+        snapshots()
     if "dose" in jobs:
         dose()
     if "gramian" in jobs:

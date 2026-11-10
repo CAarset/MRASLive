@@ -424,7 +424,19 @@ Ad-hoc modelling (no theory attached, none claimed):
   `PHI = (1 + sqrt 5) / 3`: 25 - 39 time units, at least 1.4 apart,
   pairwise incommensurate; the turns at twice that; all stretched by
   `period_scale`.  `burgers_1d_dark` is the same pipe with the left
-  beam off.  Before (2026-10-27/28): six Gaussian heaters on a 3x2 grid
+  beam off.  Since 2026-11-07 (the user's): holes of radius 0.27 (from 0.18),
+  a larger shadow for the dark pipe, and light never below a quarter of its
+  peak (`PULSE_FLOOR`; the pulse is `1/4 + 3/4 |sin|`).  Since 2026-11-09
+  (the user's): the middle beam turns with period 50 (`TURNS`), two full
+  turns by t = 100, where twice its drawn period, 66.6, gave 1.50; its start
+  (120 degrees), sense, pulse and width are as before, and so are the other
+  beams (1.77 and 1.28 turns by t = 100).  Production at t = 100 (h = 0.05,
+  dt = 0.025), against 2026-11-08's: `burgers_1d` 0.39 % / 6.55 % / 26.1 %
+  at noise 0 / 1 % / 5 % (0.43 / 6.24 / 24.8 %); `burgers_1d_dark` 25.0 % /
+  26.1 % / 35.5 % (28.9 / 29.9 / 38.6 %), whose post-hoc PE now passes
+  (mu >= 0.163, it failed).  Noise-free by thirds (left / middle / right):
+  0.34 / 0.07 / 0.55 % and, dark, 44.6 / 0.19 / 0.56 %.  Every run is at
+  its least error at t = 100.  Before (2026-10-27/28): six Gaussian heaters on a 3x2 grid
   sweeping Lissajous paths, then three heaters circling the holes (which
   left the pipe ends unexcited and q there unidentified, error ~12 %);
   earlier still the same six heaters fixed in place.  For the long-time
