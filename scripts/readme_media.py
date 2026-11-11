@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-"""The README's animation: clean 2D Burgers flow, reconstruction, truth.
+"""The README's banner and animation: clean 2D Burgers flow, reconstruction,
+truth.
 
 A noise-free run of the ``burgers_2d`` example on a finer mesh than the
 paper's (``FINE``; the paper's run is ``h = 0.05``), up to ``UNTIL``, with
@@ -13,7 +14,9 @@ logarithmic scale over ``DECADES`` decades, its top the largest speed of the
 frames shown, so it reaches its top by the last one: the inflow ramps up
 from rest, and on a linear scale its first hundredth -- already enough to
 move qhat near the inlet -- would not show.  q and qhat are on [0.5, 1],
-the range of q.
+the range of q.  The banner, ``docs/media/banner.webp``, is the same movie
+smaller (``BANNER_WIDTH`` per panel), with short labels and no time stamp,
+beside the name and a line on what the package does (``HEADING``).
 
 ``FPS``: an animated image's frame lasts a whole number of milliseconds,
 and browsers show a frame of 10 ms or less for 100 ms (a rule inherited
@@ -41,14 +44,19 @@ UNTIL = 25.0                         # model time the run and animation end at
 FINE = dict(h=0.025, dt=0.025)       # the run's mesh width and time step
 STEM = ROOT / "results" / "readme" / "burgers_2d_fine_noise0"
 TARGET = ROOT / "docs" / "media" / "burgers2d.webp"
+BANNER = ROOT / "docs" / "media" / "banner.webp"
 FPS = 90
-PANEL_WIDTH = 260                    # pixels per panel; 418 tall
+PANEL_WIDTH = 200                    # pixels per panel; 312 tall, 672 in all
 TITLES = ("Burgers flow over\nan unknown material",
           r"parameter reconstruction $\hat q$",
           r"true parameter $q^\dagger$")
 Q_RANGE = (0.5, 1.0)
 DECADES = 3
 NCOLORS = 256  # continuous: qhat_0 = 0.75 sits on a band edge of 8 bands
+BANNER_WIDTH = 130                   # pixels per panel; 862 x 239 in all
+BANNER_TITLES = ("flow", r"reconstruction $\hat q$", r"truth $q^\dagger$")
+HEADING = ("MRASLive", "online parameter identification\nfor time-dependent PDEs",
+           "NGSolve · model reference adaptation · live")
 
 
 def simulate():
@@ -68,12 +76,15 @@ def simulate():
 
 
 def render():
-    path = render_movie(STEM.with_suffix(".h5"), TARGET, fps=FPS, every=1,
-                        panel_width=PANEL_WIDTH, layout="side", until=UNTIL,
-                        layout_options={"titles": TITLES, "q_range": Q_RANGE,
-                                        "log_decades": DECADES,
-                                        "ncolors": NCOLORS})
-    print(f"wrote {path} ({path.stat().st_size / 1e6:.1f} MB)")
+    scale = {"q_range": Q_RANGE, "log_decades": DECADES, "ncolors": NCOLORS}
+    for target, width, options in (
+            (TARGET, PANEL_WIDTH, {"titles": TITLES}),
+            (BANNER, BANNER_WIDTH, {"titles": BANNER_TITLES, "title_size": 10,
+                                    "stamp": False, "heading": HEADING})):
+        path = render_movie(STEM.with_suffix(".h5"), target, fps=FPS, every=1,
+                            panel_width=width, layout="side", until=UNTIL,
+                            layout_options={**scale, **options})
+        print(f"wrote {path} ({path.stat().st_size / 1e6:.1f} MB)")
 
 
 def main():

@@ -611,7 +611,11 @@ class SideBySide:
     continuously, and a value on a band's edge -- an estimate starting
     halfway along its range -- no longer flickers between two bands at
     round-off changes.  ``panel_width`` is each panel's width in pixels; its
-    height follows from the domain's box.
+    height follows from the domain's box, and ``title_size`` sets the
+    titles' font size.  ``stamp`` (on) puts the time and the error over the
+    panels.  ``heading``, a ``(name, subtitle, note)`` triple, puts a block
+    of text to the left of the panels, ``heading_width`` pixels wide: the
+    picture as a banner.
 
     The movie (:mod:`mras.movie`, ``layout="side"``) drives it as it drives
     :class:`Panels`: :meth:`fill`, :meth:`extremes`, :meth:`frame_ranges`,
@@ -619,7 +623,8 @@ class SideBySide:
     """
 
     def __init__(self, prob, panel_width=260, horizon=None, titles=None,
-                 q_range=None, log_decades=None, ncolors=None):
+                 q_range=None, log_decades=None, ncolors=None,
+                 title_size=11, stamp=True, heading=None, heading_width=400):
         self.prob = prob
         self.horizon = horizon
         self.z = GridFunction(prob.Ufes)
@@ -650,17 +655,24 @@ class SideBySide:
         self._view = frame(render_data(self._datum, prob.mesh),
                            width=panel_width, height=None, fit="box")
         w, h = self._view.width, self._view.height
-        gap, top, title, bottom = 18, 36, 46, 8
-        width = len(names) * w + (len(names) + 1) * gap
+        gap, bottom = 18, 8
+        top = 36 if stamp else 12
+        title = round(4.2 * title_size) if any("\n" in n for n in names) \
+            else round(2.2 * title_size)
+        left = heading_width if heading is not None else 0
+        width = left + len(names) * w + (len(names) + 1) * gap
         height = top + title + h + bottom
         self.figure = Figure(figsize=(width / 100, height / 100), dpi=100)
         FigureCanvasAgg(self.figure)
+        if heading is not None:
+            self._heading(heading, gap / width, height)
         self._axes = []
         for col, name in enumerate(names):
-            x, y = gap + col * (w + gap), top + title
+            x, y = left + gap + col * (w + gap), top + title
             ax = self.figure.add_axes((x / width, 1 - (y + h) / height,
                                        w / width, h / height))
-            ax.set_title(name, fontsize=11, linespacing=1.3)
+            ax.set_title(name, fontsize=title_size, linespacing=1.3,
+                         color="0.25" if heading is not None else "black")
             ax.set_axis_off()
             self._axes.append(ax)
         if truth_payload is not None:  # painted once: q does not move
@@ -668,7 +680,20 @@ class SideBySide:
                  wireframe=False, **_range_kwargs(*self._q_span),
                  **self._colours)
             self._axes[2].set_axis_off()
-        self._title = self.figure.suptitle("", fontsize=11, y=0.985)
+        self._title = (self.figure.suptitle("", fontsize=11, y=0.985)
+                       if stamp else None)
+
+    def _heading(self, heading, x, height):
+        """The banner's text: a name, a subtitle under it and a note at the
+        foot, left-aligned at ``x`` (a figure fraction)."""
+        name, subtitle, note = heading
+        self.figure.text(x, 0.66, name, fontsize=0.17 * height,
+                         fontweight="bold", color="#1f2328", va="center")
+        self.figure.text(x, 0.40, subtitle, fontsize=0.054 * height,
+                         color="#57606a", va="center", linespacing=1.35)
+        if note:
+            self.figure.text(x, 0.14, note, fontsize=0.042 * height,
+                             color="#8c959f", va="center")
 
     def fill(self, t, u, z, q):
         """Put a stored state into the picture (u is not shown)."""
@@ -724,7 +749,8 @@ class SideBySide:
             Plot(payload, ax=ax, view=self._view, wireframe=False, **kw,
                  **self._colours)
             ax.set_axis_off()
-        self._title.set_text(job["title"])
+        if self._title is not None:
+            self._title.set_text(job["title"])
         buffer = BytesIO()
         self.figure.savefig(buffer, format="png")
         return buffer.getvalue()

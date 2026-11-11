@@ -1,0 +1,42 @@
+cff-version: 1.2.0
+message: "If you use MRASLive, please cite the software as below, and the papers it implements."
+type: software
+title: "MRASLive: online parameter identification for time-dependent PDEs by model reference adaptation"
+authors:
+  - family-names: Kaltenbach
+    given-names: Benedikt
+  - family-names: Aarset
+    given-names: Christian
+  - family-names: Nguyen
+    given-names: Tram Thi Ngoc
+version: 0.1.0
+license: MIT
+repository-code: "https://github.com/CAarset/MRASLive"
+references:
+  - type: article
+    authors:
+      - family-names: Kaltenbach
+        given-names: Benedikt
+      - family-names: Aarset
+        given-names: Christian
+      - family-names: Nguyen
+        given-names: Tram Thi Ngoc
+    title: "Data assimilation via model reference adaptation for linear and nonlinear dynamical systems"
+    journal: "Applied Mathematics for Modern Challenges"
+    volume: 8
+    start: 80
+    end: 112
+    year: 2026
+    doi: "10.3934/ammc.2026005"
+  - type: article
+    authors:
+      - family-names: Kaltenbacher
+        given-names: Barbara
+      - family-names: Nguyen
+        given-names: Tram Thi Ngoc
+    title: "A model reference adaptive system approach for nonlinear online parameter identification"
+    journal: "Inverse Problems"
+    volume: 37
+    issue: 5
+    start: "055006"
+    year: 2021

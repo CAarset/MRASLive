@@ -204,6 +204,11 @@ class GaussianFEMNoise:
 
 
 NOISE_LENGTH = 0.05  # Matern correlation length: this fraction of the diagonal
+# The Robin coefficient of the Matern field's boundary condition du/dn + beta u
+# = 0, as a fraction of kappa = sqrt(8 nu) / length: 1/1.42 keeps the variance
+# close to one up to the boundary for nu = 1 in 2D (Roininen, Huttunen and
+# Lasanen 2014), ngsrng's default until it made beta a required argument.
+ROBIN_FACTOR = 1 / 1.42
 
 
 class MaternFEMNoise:
@@ -244,8 +249,9 @@ class MaternFEMNoise:
         self._n = scalar.ndof
         rng = ngsrng.default_rng(
             scalar, dtype=torch.float64,
-            correlation=ngsrng.matern_correlation(self.length, nu=self.nu,
-                                                  boundary="robin"))
+            correlation=ngsrng.matern_correlation(
+                self.length, nu=self.nu, boundary="robin",
+                beta=ROBIN_FACTOR * np.sqrt(8 * self.nu) / self.length))
         self._gaussian = rng.gaussian()
         u, v = fes.TnT()
         mass = BilinearForm(fes)

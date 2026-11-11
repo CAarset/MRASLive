@@ -22,7 +22,7 @@ import pytest
 from mras.live import build
 
 MICRO = dict(h=0.4, dt=0.02, tend=0.4)
-RECOVERY = dict(h=0.4, dt=0.02, tend=8.0)
+RECOVERY = dict(h=0.4, dt=0.05, tend=8.0)  # final errors 0.11, as at dt = 0.02
 
 
 @pytest.fixture(scope="module")

@@ -1,23 +1,37 @@
-<div align="center">
+<p align="center">
+  <img src="docs/media/banner.webp" width="100%" alt="MRASLive: online parameter identification for time-dependent PDEs. A 2D Burgers flow, the viscosity reconstructed from it as the data arrive, and the true viscosity">
+</p>
 
-# MRAS
+<p align="center">
+  <a href="https://github.com/CAarset/MRASLive/actions/workflows/tests.yml"><img src="https://github.com/CAarset/MRASLive/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
+  <a href="https://www.python.org"><img src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+"></a>
+  <a href="https://ngsolve.org"><img src="https://img.shields.io/badge/NGSolve-6.2%2B-1f5f99" alt="NGSolve 6.2+"></a>
+  <a href="https://doi.org/10.3934/ammc.2026005"><img src="https://img.shields.io/badge/paper-AMMC%202026-informational" alt="Paper: AMMC 2026"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
+</p>
 
-**Online parameter identification for time-dependent PDEs, by model reference adaptation**
+<p align="center">
+  <b>Online parameter identification for time-dependent PDEs, by model reference adaptation.</b>
+</p>
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![FEM: NGSolve](https://img.shields.io/badge/FEM-NGSolve-orange.svg)](https://ngsolve.org)
-[![Paper](https://img.shields.io/badge/paper-AMMC%202026-informational.svg)](https://doi.org/10.3934/ammc.2026005)
-
-<img src="docs/media/burgers2d.webp" width="852" alt="2D Burgers flow up a channel with three barriers (left), the viscosity reconstructed from it as the data arrive (middle), and the true viscosity (right)">
-
-<sub>Vector Burgers flow up a channel with three barriers. Left: the flow speed the data show, on a logarithmic scale. Middle: the viscosity MRAS reconstructs from those data as they arrive. Right: the true viscosity. Noise-free data, <i>t</i> = 0 to 25, on a mesh of width 0.025.</sub>
-
-</div>
+<p align="center">
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#installation">Installation</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#examples">Examples</a> ·
+  <a href="#verification">Verification</a> ·
+  <a href="#citation">Citation</a>
+</p>
 
 ---
 
 Data of a state arrive over time; a parameter of the equation behind them is unknown. MRAS runs a copy of the model alongside the data, nudged towards them, and lets the mismatch drive an estimate of the parameter, step by step as the data come in. No adjoint solves and no pass over the whole record are needed. This repository turns the method into a toolbox: you declare the physics, and it builds the forward model, the estimator and its solves, and checks the theory's assumptions for your problem.
+
+<p align="center">
+  <img src="docs/media/burgers2d.webp" width="672" alt="2D Burgers flow up a channel with three barriers (left), the viscosity reconstructed from it as the data arrive (middle), and the true viscosity (right)">
+  <br>
+  <sub>Vector Burgers flow up a channel with three barriers. Left: the flow speed the data show, on a logarithmic scale. Middle: the viscosity MRAS reconstructs from those data as they arrive. Right: the true viscosity. Noise-free data, <i>t</i> = 0 to 25, on a mesh of width 0.025.</sub>
+</p>
 
 ## How it works
 
@@ -55,7 +69,7 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[notebook,dev]"
 ```
 
-[ngsplot](https://github.com/CAarset/ngsplot) and [ngsrng](https://github.com/CAarset/ngsrng) are installed from GitHub; while those repositories are private, `git` needs credentials (`gh auth login`). Movies need `ffmpeg`. The Darcy example reads one PDEBench file:
+[ngsplot](https://github.com/CAarset/ngsplot) and [ngsrng](https://github.com/CAarset/ngsrng) are installed from GitHub, at the latest commit of each. Movies need `ffmpeg`. The Darcy example reads one PDEBench file:
 
 ```bash
 mkdir -p data && curl -L -o data/2D_DarcyFlow_beta100.0_Train.hdf5 \
@@ -133,7 +147,6 @@ The tiers and the theory behind each check are set out in the docstring of [`mra
 | AMMC Table 7, Figs 5–8 | `scripts/reproduce.py --problem fisher` / `--problem potential`, then `make_figures.py` |
 | AMMC Table 8, Figs 9–11 | `scripts/reproduce.py --problem allen_cahn`, then `make_figures.py` |
 | every example, every noise level | `scripts/run_examples.py` (resumable; `--resume`, `--movie-from`) |
-| the proceedings' figures | `proceedings/scripts/figures.py` |
 | the animation above | `scripts/readme_media.py` |
 
 The paper's reproduction scripts take `--micro` for a seconds-long wiring check; their full-size runs take hours per noise level.
@@ -147,14 +160,24 @@ examples/    one file per problem, plus the blank template
 configs/     YAML run configurations
 scripts/     runners, paper reproductions, checklist, diagnostics
 notebooks/   the live notebook
-proceedings/ the proceedings paper, its figures and the script that makes them
 tests/       pytest suite (.venv/bin/pytest -q)
 docs/media/  the animation above
 ```
 
 ## Citation
 
+If you use MRASLive, please cite the software ([`CITATION.cff`](CITATION.cff)) and the papers it implements.
+
 ```bibtex
+@software{MRASLive,
+  author  = {Kaltenbach, Benedikt and Aarset, Christian and Nguyen, Tram Thi Ngoc},
+  title   = {{MRASLive}: online parameter identification for time-dependent {PDEs} by model reference adaptation},
+  year    = {2026},
+  version = {0.1.0},
+  url     = {https://github.com/CAarset/MRASLive},
+  license = {MIT}
+}
+
 @article{KaltenbachAarsetNguyen2026,
   author  = {Kaltenbach, Benedikt and Aarset, Christian and Nguyen, Tram Thi Ngoc},
   title   = {Data assimilation via model reference adaptation for linear and nonlinear dynamical systems},
@@ -178,4 +201,4 @@ docs/media/  the animation above
 
 ## License
 
-[MIT](LICENSE), for every version of this repository, including its earliest commits. The code it grew from, the authors' earlier MRAS code, was first released under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); its copyright holders, the authors named in [LICENSE](LICENSE), release it as contained here under the MIT License as well.
+[MIT](LICENSE), for every version of this repository, including its earliest commits. The code it grew from, the authors' earlier [MRAS](https://github.com/CAarset/MRAS) code, was first released under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); its copyright holders, the authors named in [LICENSE](LICENSE), release it as contained here under the MIT License as well.

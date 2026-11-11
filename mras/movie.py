@@ -29,10 +29,13 @@ true parameter side by side on fixed colour ranges
 at that model time, its frames and colour ranges from the stored steps up
 to it.  The file's suffix picks the format: ``.mp4`` (H.264), or ``.webp``
 (animated WebP, which web pages and READMEs show inline), or ``.gif``.
-The WebP is lossless: lossy, its encoder re-codes only the 16-pixel blocks
-that change, and the seams between re-coded and kept blocks pile up into
-streaks over hundreds of frames; lossless, it is exact, and these
-pictures' flat colour fields keep it small.
+The WebP is written by libwebp's own animation encoder (through Pillow),
+lossy at ``WEBP_QUALITY``: ffmpeg's wrapper re-codes only the 16-pixel
+blocks that change, and the seams between re-coded and kept blocks pile up
+into streaks over hundreds of frames, while lossless is exact but, for
+colour fields that change everywhere every frame, some five times larger.
+Each frame lasts its share of whole milliseconds, so the rate is exact
+over the movie.
 """
 
 import math
@@ -48,6 +51,7 @@ import numpy as np
 MAX_FPS = 120.0          # the smoothest a movie plays
 DURATION = (4.0, 10.0)   # seconds a movie lasts, at least and at most
 PACE = 30.0              # frames a second, where neither bound binds
+WEBP_QUALITY = 75        # lossy animated WebP, 0 (smallest) to 100
 
 _WORKER = {}  # the stored run and its figure, in each worker process
 
@@ -185,9 +189,8 @@ def render_movie(checkpoint, path=None, fps=None, every=None, workers=None,
     if problem is not None and not stored.attrs["arguments"]:
         workers = 1  # the workers could not build it again
 
-    _layout(layout)  # an unknown layout fails before ffmpeg starts
-    encoder = subprocess.Popen(_encoder(path, fps), stdin=subprocess.PIPE,
-                               stderr=subprocess.PIPE)
+    _layout(layout)  # an unknown layout fails before encoding starts
+    encoder = _Encoder(path, fps)
     try:
         parallel = workers > 1
         if parallel:
@@ -207,21 +210,65 @@ def render_movie(checkpoint, path=None, fps=None, every=None, workers=None,
                    layout, horizon, layout_options)
             seen = [_extremes(k) for k in frames]
             for task in zip(frames, _ranges(_WORKER["panels"], times, seen)):
-                encoder.stdin.write(_paint(task))
-        encoder.stdin.close()
-        if encoder.wait() != 0:
-            raise RuntimeError(f"ffmpeg failed: {encoder.stderr.read().decode()}")
+                encoder.write(_paint(task))
+        encoder.finish()
     except BaseException:
-        encoder.kill()
+        encoder.abort()
         raise
     finally:
         _WORKER.clear()
     return path
 
 
-def _encoder(path, fps):
+class _Encoder:
+    """Takes a movie's frames as PNG bytes, in order, and writes ``path``
+    in the format of its suffix: ffmpeg for MP4 and GIF, streamed through a
+    pipe; Pillow (libwebp's animation encoder) for WebP, which encodes the
+    frames once all are in."""
+
+    def __init__(self, path, fps):
+        self.path, self.fps = path, fps
+        if path.suffix.lower() == ".webp":
+            self._frames, self._process = [], None
+        else:
+            self._process = subprocess.Popen(_ffmpeg(path, fps),
+                                             stdin=subprocess.PIPE,
+                                             stderr=subprocess.PIPE)
+
+    def write(self, png):
+        if self._process is None:
+            self._frames.append(png)
+        else:
+            self._process.stdin.write(png)
+
+    def finish(self):
+        if self._process is None:
+            self._webp()
+            return
+        self._process.stdin.close()
+        if self._process.wait() != 0:
+            raise RuntimeError(
+                f"ffmpeg failed: {self._process.stderr.read().decode()}")
+
+    def abort(self):
+        if self._process is not None:
+            self._process.kill()
+
+    def _webp(self):
+        from io import BytesIO
+        from PIL import Image
+        images = [Image.open(BytesIO(png)).convert("RGB")
+                  for png in self._frames]
+        ends = [round(1000 * (k + 1) / self.fps) for k in range(len(images))]
+        durations = [end - start for start, end in zip([0] + ends, ends)]
+        images[0].save(self.path, format="WEBP", save_all=True,
+                       append_images=images[1:], duration=durations, loop=0,
+                       lossless=False, quality=WEBP_QUALITY, method=4)
+
+
+def _ffmpeg(path, fps):
     """The ffmpeg command that reads PNG frames from stdin and writes
-    ``path`` in the format of its suffix."""
+    ``path`` in the format of its suffix (MP4 or GIF)."""
     head = [mpl.rcParams["animation.ffmpeg_path"], "-y", "-loglevel", "error",
             "-f", "image2pipe", "-framerate", f"{fps:g}", "-c:v", "png",
             "-i", "-"]
@@ -230,9 +277,6 @@ def _encoder(path, fps):
         tail = ["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2:color=white",
                 "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
                 "-movflags", "+faststart"]
-    elif suffix == ".webp":  # lossless: see the module docstring
-        tail = ["-c:v", "libwebp_anim", "-lossless", "1",
-                "-compression_level", "6", "-loop", "0"]
     elif suffix == ".gif":
         tail = ["-vf", "split[a][b];[a]palettegen=stats_mode=diff[p];"
                 "[b][p]paletteuse=dither=sierra2_4a", "-loop", "0"]
@@ -267,7 +311,7 @@ def _render_parallel(checkpoint, frames, times, workers, panel_width, problem,
                 tasks = list(zip(frames[start:start + batch],
                                  ranges[start:start + batch]))
                 for png in pool.map(_paint, tasks):
-                    encoder.stdin.write(png)
+                    encoder.write(png)
     finally:
         for key, value in saved.items():
             if value is None:

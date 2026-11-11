@@ -32,3 +32,6 @@ campaign_state/
 !README.md
 .claude/
 .claude*
+
+# The proceedings paper stays local
+proceedings/
