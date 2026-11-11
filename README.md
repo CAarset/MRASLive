@@ -178,4 +178,4 @@ docs/media/  the animation above
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE), for every version of this repository, including its earliest commits. The code it grew from, the authors' earlier MRAS code, was first released under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); its copyright holders, the authors named in [LICENSE](LICENSE), release it as contained here under the MIT License as well.
