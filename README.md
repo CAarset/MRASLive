@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/media/banner.webp" width="100%" alt="MRASLive: online parameter identification for time-dependent PDEs. A 2D Burgers flow, the viscosity reconstructed from it as the data arrive, and the true viscosity">
+  <img src="docs/media/banner.webp" width="100%" alt="MRASLive: online parameter identification for time-dependent PDEs">
 </p>
 
 <p align="center">
@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <b>Online parameter identification for time-dependent PDEs, by model reference adaptation.</b>
+  <b>Online parameter identification for time-dependent PDEs via model reference adaptation.</b>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
 
 ---
 
-Data of a state arrive over time; a parameter of the equation behind them is unknown. MRAS runs a copy of the model alongside the data, nudged towards them, and lets the mismatch drive an estimate of the parameter, step by step as the data come in. No adjoint solves and no pass over the whole record are needed. This repository turns the method into a toolbox: you declare the physics, and it builds the forward model, the estimator and its solves, and checks the theory's assumptions for your problem.
+Data of a state arrive over time; a parameter of the equation behind them is unknown. MRAS runs a copy of the model alongside the data, nudged towards them, and lets the mismatch drive an estimate of the parameter, step by step as the data come in. This repository turns the method into a toolbox: you declare the physics, it builds the forward model, the estimator and its solves, and checks the theory's assumptions for your problem.
 
 <p align="center">
   <img src="docs/media/burgers2d.webp" width="672" alt="2D Burgers flow up a channel with three barriers (left), the viscosity reconstructed from it as the data arrive (middle), and the true viscosity (right)">
