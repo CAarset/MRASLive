@@ -22,8 +22,10 @@ frames the live view would have painted, had it painted every step.
     render_movie("results/burgers_1d/burgers_1d_noise0.h5")
 
 ``layout`` picks the picture: ``"live"``, the live view's full figure
-(:class:`mras.live.Panels`), or ``"pair"``, the datum beside the estimate
-on fixed colour ranges (:class:`mras.live.Pair`).  ``until`` ends a movie
+(:class:`mras.live.Panels`), or ``"side"``, the datum, the estimate and the
+true parameter side by side on fixed colour ranges
+(:class:`mras.live.SideBySide`); ``layout_options`` go to the layout (a
+``SideBySide`` takes ``titles`` and ``q_range``).  ``until`` ends a movie
 at that model time, its frames and colour ranges from the stored steps up
 to it.  The file's suffix picks the format: ``.mp4`` (H.264), or ``.webp``
 (animated WebP, which web pages and READMEs show inline), or ``.gif``.
@@ -80,28 +82,30 @@ def _horizon(stored):
 
 
 def _layout(name):
-    from .live import Pair, Panels
-    layouts = {"live": Panels, "pair": Pair}
+    from .live import Panels, SideBySide
+    layouts = {"live": Panels, "side": SideBySide}
     if name not in layouts:
         raise ValueError(f"layout is one of {sorted(layouts)}, not {name!r}")
     return layouts[name]
 
 
-def _setup(path, panel_width, problem=None, layout="live", horizon=None):
+def _setup(path, panel_width, problem=None, layout="live", horizon=None,
+           options=None):
     from .checkpoint import load
     stored = load(path, problem)
     _WORKER["stored"] = stored
     _WORKER["panels"] = _layout(layout)(
         stored.problem, panel_width=panel_width,
-        horizon=_horizon(stored) if horizon is None else horizon)
+        horizon=_horizon(stored) if horizon is None else horizon,
+        **(options or {}))
     _WORKER["history"] = (stored.history.get("error_q"),
                           stored.history.get("misfit_u"))
 
 
-def _init(path, panel_width, layout, horizon):
+def _init(path, panel_width, layout, horizon, options):
     import ngsolve
     ngsolve.SetNumThreads(1)  # one process per core does the parallelism
-    _setup(path, panel_width, layout=layout, horizon=horizon)
+    _setup(path, panel_width, layout=layout, horizon=horizon, options=options)
 
 
 def _fill(k):
@@ -145,7 +149,8 @@ def _ranges(panels, times, seen):
 
 
 def render_movie(checkpoint, path=None, fps=None, every=None, workers=None,
-                 panel_width=400, problem=None, layout="live", until=None):
+                 panel_width=400, problem=None, layout="live", until=None,
+                 layout_options=None):
     """Render the movie of a checkpointed run; return its path (the
     checkpoint's, as MP4, unless given; the suffix picks the format).
 
@@ -154,8 +159,8 @@ def render_movie(checkpoint, path=None, fps=None, every=None, workers=None,
     processes paint (half the cores unless given; 1 paints in this
     process).  ``problem`` is needed only when the file cannot build the
     problem again, and then the frames are painted here.  ``layout`` is
-    ``"live"`` or ``"pair"``; ``until`` ends the movie at that model time
-    (the module docstring).
+    ``"live"`` or ``"side"``, with ``layout_options`` for it; ``until`` ends
+    the movie at that model time (the module docstring).
     """
     from .checkpoint import load
     checkpoint = Path(checkpoint)
@@ -189,7 +194,7 @@ def render_movie(checkpoint, path=None, fps=None, every=None, workers=None,
             try:
                 _render_parallel(checkpoint, frames, times, workers,
                                  panel_width, problem or stored.problem,
-                                 encoder, horizon, layout)
+                                 encoder, horizon, layout, layout_options)
             except BrokenProcessPool:
                 # A worker that cannot start (say, under a parent run from
                 # stdin, whose main module a spawned process cannot import)
@@ -199,7 +204,7 @@ def render_movie(checkpoint, path=None, fps=None, every=None, workers=None,
                 parallel = False
         if not parallel:
             _setup(checkpoint, panel_width, problem or stored.problem,
-                   layout, horizon)
+                   layout, horizon, layout_options)
             seen = [_extremes(k) for k in frames]
             for task in zip(frames, _ranges(_WORKER["panels"], times, seen)):
                 encoder.stdin.write(_paint(task))
@@ -237,7 +242,7 @@ def _encoder(path, fps):
 
 
 def _render_parallel(checkpoint, frames, times, workers, panel_width, problem,
-                     encoder, horizon, layout):
+                     encoder, horizon, layout, options):
     import multiprocessing as mp
     from concurrent.futures import ProcessPoolExecutor
     # One thread per worker: numpy's BLAS and NGSolve would each take every
@@ -249,13 +254,14 @@ def _render_parallel(checkpoint, frames, times, workers, panel_width, problem,
         pool = ProcessPoolExecutor(workers, mp_context=mp.get_context("spawn"),
                                    initializer=_init,
                                    initargs=(str(checkpoint), panel_width,
-                                             layout, horizon))
+                                             layout, horizon, options))
         with pool:
             chunk = max(1, len(frames) // (8 * workers))
             seen = list(pool.map(_extremes, frames, chunksize=chunk))
             ranges = _ranges(_layout(layout)(problem,
                                              panel_width=panel_width,
-                                             horizon=horizon), times, seen)
+                                             horizon=horizon,
+                                             **(options or {})), times, seen)
             batch = 4 * workers  # what memory holds at once
             for start in range(0, len(frames), batch):
                 tasks = list(zip(frames[start:start + batch],

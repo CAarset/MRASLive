@@ -9,9 +9,9 @@
 [![FEM: NGSolve](https://img.shields.io/badge/FEM-NGSolve-orange.svg)](https://ngsolve.org)
 [![Paper](https://img.shields.io/badge/paper-AMMC%202026-informational.svg)](https://doi.org/10.3934/ammc.2026005)
 
-<img src="docs/media/burgers2d.webp" width="574" alt="2D Burgers flow up a channel with three barriers (left) and the viscosity reconstructed from it as the data arrive (right)">
+<img src="docs/media/burgers2d.webp" width="852" alt="2D Burgers flow up a channel with three barriers (left), the viscosity reconstructed from it as the data arrive (middle), and the true viscosity (right)">
 
-<sub>Vector Burgers flow up a channel with three barriers. Left: the flow speed the data show. Right: the viscosity MRAS reconstructs from those data as they arrive, on the colour scale of the true one. Noise-free data, <i>t</i> = 0 to 20.</sub>
+<sub>Vector Burgers flow up a channel with three barriers. Left: the flow speed the data show, on a logarithmic scale. Middle: the viscosity MRAS reconstructs from those data as they arrive. Right: the true viscosity. Noise-free data, <i>t</i> = 0 to 25, on a mesh of width 0.025.</sub>
 
 </div>
 
@@ -123,7 +123,7 @@ flowchart LR
 .venv/bin/python scripts/checklist.py       # every example -> results/checklist.md
 ```
 
-The tiers, the theory behind each check and every departure from the papers are in [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md) and [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
+The tiers and the theory behind each check are set out in the docstring of [`mras/verify.py`](mras/verify.py).
 
 ## Reproducing results
 
@@ -149,7 +149,7 @@ scripts/     runners, paper reproductions, checklist, diagnostics
 notebooks/   the live notebook
 proceedings/ the proceedings paper, its figures and the script that makes them
 tests/       pytest suite (.venv/bin/pytest -q)
-docs/        theory digest, assumption ledger, deviations from the papers
+docs/media/  the animation above
 ```
 
 ## Citation

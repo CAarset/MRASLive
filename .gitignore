@@ -21,3 +21,10 @@ archive/
 data/
 campaign_state/
 *.egg-info/
+
+# Notes and assistant files stay local: every Markdown file but the README,
+# and anything of Claude's.
+*.md
+!README.md
+.claude/
+.claude*

@@ -46,7 +46,7 @@ import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from ngsolve import (L2, CoefficientFunction, GridFunction, InnerProduct,
-                     Integrate, Norm, Parameter)
+                     Integrate, Norm, Parameter, log)
 from ngsplot import Plot, frame, render_data
 
 from .config import RunConfig, load_yaml, build as problem_from_config
@@ -589,49 +589,85 @@ class Panels:
         return buffer.getvalue()
 
 
-class Pair:
-    """The short picture: the datum beside the estimate, nothing else.
+class SideBySide:
+    """The short picture: the datum, the estimate and, where it is known,
+    the true parameter, side by side, and nothing else.
 
     The flow the data show -- the datum z, painted as its length for a
-    vector state -- and the estimate qhat side by side, titled with the time
-    and the relative error.  Each panel keeps one colour range for a whole
-    movie: the datum's from its extremes over all frames (from zero for a
-    length), the estimate's q's padded range, as in :class:`Panels`, or its
-    own extremes over all frames where q is unknown.  No colourbars: the
-    picture is for showing a run, the full figure for reading one.
+    vector state -- beside the estimate qhat and the true parameter q,
+    titled with the time and the relative error.  Each panel keeps one
+    colour range for a whole movie: the datum's from its extremes over all
+    frames (from zero for a length) -- or, with ``log_decades``, its length
+    on a logarithmic scale reaching that many decades below its largest
+    value, so that a flow still small shows where it has arrived; the
+    estimate's and q's ``q_range``, or
+    else q's padded range as in :class:`Panels`, or else the estimate's own
+    extremes over all frames where q is unknown.  No colourbars: the picture
+    is for showing a run, the full figure for reading one.
 
-    The movie (:mod:`mras.movie`, ``layout="pair"``) drives it as it drives
+    ``titles`` replaces the panels' titles, in order (datum, estimate,
+    truth); a title may take two lines.  ``ncolors`` is the colour maps'
+    number of bands (ngsplot's 8 unless given): with many, colours vary
+    continuously, and a value on a band's edge -- an estimate starting
+    halfway along its range -- no longer flickers between two bands at
+    round-off changes.  ``panel_width`` is each panel's width in pixels; its
+    height follows from the domain's box.
+
+    The movie (:mod:`mras.movie`, ``layout="side"``) drives it as it drives
     :class:`Panels`: :meth:`fill`, :meth:`extremes`, :meth:`frame_ranges`,
-    :meth:`job`, :meth:`paint`.  ``panel_width`` is each panel's width in
-    pixels; its height follows from the domain's box.
+    :meth:`job`, :meth:`paint`.
     """
 
-    def __init__(self, prob, panel_width=260, horizon=None):
+    def __init__(self, prob, panel_width=260, horizon=None, titles=None,
+                 q_range=None, log_decades=None, ncolors=None):
         self.prob = prob
         self.horizon = horizon
         self.z = GridFunction(prob.Ufes)
         self.qhat = GridFunction(prob.Qfes)
         self.vector = self.z.dim > 1
+        self._decades = log_decades
+        self._colours = {} if ncolors is None else {"ncolors": int(ncolors)}
         self._datum = Norm(self.z) if self.vector else self.z
+        if log_decades is not None:  # log10 of the length, finite at rest
+            self._datum = log(Norm(self.z) + 1e-30) / np.log(10.0)
         truth = _shown_truth(prob, prob.q_floor())
-        self._q_span = (None if truth is None else _padded(*_payload_range(
+        truth_payload = None if truth is None else (
             render_data(truth) if isinstance(truth, GridFunction)
-            else render_data(truth, prob.mesh))))
+            else render_data(truth, prob.mesh))
+        if q_range is not None:
+            self._q_span = (float(q_range[0]), float(q_range[1]))
+        elif truth_payload is not None:
+            self._q_span = _padded(*_payload_range(truth_payload))
+        else:
+            self._q_span = None
+        names = [r"flow speed $|z|$" if self.vector else r"datum $z$",
+                 r"parameter reconstruction $\hat q$",
+                 r"true parameter $q^\dagger$"]
+        if titles is not None:
+            names[:len(titles)] = titles
+        if truth_payload is None:
+            names = names[:2]
         self._view = frame(render_data(self._datum, prob.mesh),
                            width=panel_width, height=None, fit="box")
         w, h = self._view.width, self._view.height
-        gap, top, title, bottom = 18, 40, 24, 8
-        width, height = 2 * w + 3 * gap, top + title + h + bottom
+        gap, top, title, bottom = 18, 36, 46, 8
+        width = len(names) * w + (len(names) + 1) * gap
+        height = top + title + h + bottom
         self.figure = Figure(figsize=(width / 100, height / 100), dpi=100)
         FigureCanvasAgg(self.figure)
         self._axes = []
-        label = r"flow speed $|z|$" if self.vector else r"datum $z$"
-        for col, name in enumerate((label, r"reconstruction $\hat q$")):
+        for col, name in enumerate(names):
             x, y = gap + col * (w + gap), top + title
             ax = self.figure.add_axes((x / width, 1 - (y + h) / height,
                                        w / width, h / height))
-            ax.set_title(name, fontsize=11)
+            ax.set_title(name, fontsize=11, linespacing=1.3)
+            ax.set_axis_off()
             self._axes.append(ax)
+        if truth_payload is not None:  # painted once: q does not move
+            Plot(truth_payload, ax=self._axes[2], view=self._view,
+                 wireframe=False, **_range_kwargs(*self._q_span),
+                 **self._colours)
+            self._axes[2].set_axis_off()
         self._title = self.figure.suptitle("", fontsize=11, y=0.985)
 
     def fill(self, t, u, z, q):
@@ -640,7 +676,8 @@ class Pair:
         self.qhat.vec.FV().NumPy()[:] = q
 
     def extremes(self):
-        """The two payloads, and the extremes of each panel's field."""
+        """The two moving panels' payloads, and the extremes of each one's
+        field."""
         payloads = [render_data(self._datum, self.prob.mesh),
                     render_data(self.qhat)]
         return payloads, {"datum": _payload_range(payloads[0]),
@@ -651,7 +688,11 @@ class Pair:
         extremes ``seen`` in all of them."""
         lo = min(s["datum"][0] for s in seen)
         hi = max(s["datum"][1] for s in seen)
-        ranges = {"datum": _range_kwargs(0.0 if self.vector else lo, hi)}
+        if self._decades is not None:
+            lo = hi - self._decades
+        elif self.vector:
+            lo = 0.0
+        ranges = {"datum": _range_kwargs(lo, hi)}
         if self._q_span is not None:
             ranges["estimate"] = _range_kwargs(*self._q_span)
         else:
@@ -670,7 +711,7 @@ class Pair:
                 ranges = self.frame_ranges([t], [seen])[0]
         title = f"t = {t:.1f}"
         history = np.asarray(history)
-        if self._q_span is not None and offset == 0 and len(history):
+        if self.prob.q_true is not None and offset == 0 and len(history):
             title += f"      error {100 * history[-1]:.1f} %"
         return {"t": t, "title": title,
                 "panels": [(ax, payload, dict(ranges[kind])) for ax, payload,
@@ -680,7 +721,8 @@ class Pair:
     def paint(self, job):
         """Paint a job into the figure; return it as PNG bytes."""
         for ax, payload, kw in job["panels"]:
-            Plot(payload, ax=ax, view=self._view, wireframe=False, **kw)
+            Plot(payload, ax=ax, view=self._view, wireframe=False, **kw,
+                 **self._colours)
             ax.set_axis_off()
         self._title.set_text(job["title"])
         buffer = BytesIO()

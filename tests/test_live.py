@@ -243,15 +243,18 @@ def test_the_movie_paces_itself_between_four_and_ten_seconds(stored_run,
     assert num / den == pytest.approx(steps / 4.0, rel=1e-3)
 
 
-def test_the_pair_layout_plays_as_an_animated_webp(stored_run, tmp_path):
-    """The short picture (datum beside estimate, ``layout="pair"``) as an
+def test_the_side_layout_plays_as_an_animated_webp(stored_run, tmp_path):
+    """The short picture (datum, estimate, truth, ``layout="side"``) as an
     animated WebP at 60 frames a second: a stored step every 1/60 s, to the
     millisecond (libwebp merges identical consecutive frames, adding their
     durations); unknown layouts and formats are refused before ffmpeg."""
     from PIL import Image
     steps = len(load(stored_run).steps)
-    path = render_movie(stored_run, tmp_path / "pair.webp", fps=60,
-                        workers=1, layout="pair", panel_width=120)
+    path = render_movie(stored_run, tmp_path / "side.webp", fps=60,
+                        workers=1, layout="side", panel_width=120,
+                        layout_options={"titles": ("a", "b", "c"),
+                                        "q_range": (0.0, 1.0),
+                                        "log_decades": 3, "ncolors": 64})
     with Image.open(path) as image:
         assert image.format == "WEBP" and 1 < image.n_frames <= steps
         durations = []
@@ -265,7 +268,7 @@ def test_the_pair_layout_plays_as_an_animated_webp(stored_run, tmp_path):
     stored = load(stored_run)
     shown = sum(float(t) <= 0.5 + 1e-12 for t in stored.times)
     frames = _probe(render_movie(stored_run, tmp_path / "until.mp4", fps=60,
-                                 workers=1, layout="pair", until=0.5))[2]
+                                 workers=1, layout="side", until=0.5))[2]
     assert frames == shown < steps
     with pytest.raises(ValueError, match="layout"):
         render_movie(stored_run, tmp_path / "x.mp4", layout="nope", workers=1)
