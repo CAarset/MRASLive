@@ -16,7 +16,11 @@ MRAS_Paper.pdf
 docs/references/*.pdf
 
 # Simulation output
-results/
+results/*
+# ... but the movies of the Burgers runs, and nothing else of them
+!results/burgers_*/
+results/burgers_*/*
+!results/burgers_*/*.mp4
 archive/
 data/
 campaign_state/
