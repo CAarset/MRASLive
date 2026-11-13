@@ -22,7 +22,9 @@ results/*
 results/burgers_*/*
 !results/burgers_*/*.mp4
 archive/
-data/
+# The PDEBench download at the root only: unanchored, this also hid the
+# package mras/data/ from the repository.
+/data/
 campaign_state/
 *.egg-info/
 

@@ -35,3 +35,6 @@ include = ["mras*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The repository root, so that tests can import the top-level ``scripts``
+# package under a plain ``pytest`` (as CI runs it), not only ``python -m pytest``.
+pythonpath = ["."]
