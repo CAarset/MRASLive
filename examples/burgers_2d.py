@@ -120,11 +120,14 @@ class Burgers2D(MRASProblem):
     sigma = 0.0
     L = 0.0
     smooth_scale = 100.0  # tau = 1.7 at 1 % noise, 5 at 5 %
+    dirichlet_part = "inlet"  # the Dirichlet part of U_h: the inflow
+    slip = SLIP               # the slip surfaces
 
     def __init__(self, h=0.12, dt=0.05, tend=10.0, k_u=3, k_q=0, seed=0,
                  fitted=False):
         super().__init__(burgers_channel(maxh=h, order_u=k_u, order_q=k_q,
-                                         dirichlet="inlet", fitted=fitted),
+                                         dirichlet=self.dirichlet_part,
+                                         fitted=fitted),
                          dt=dt, tend=tend, k_u=k_u, seed=seed)
         self.u0 = CoefficientFunction((0, 0))  # at rest; the inflow ramps up
         # The shapes on a mesh of their own, exact there.
@@ -142,7 +145,7 @@ class Burgers2D(MRASProblem):
 
     def model_boundary(self, u, w):
         # A stiff resistance to flow through them, none along.
-        return {SLIP: WALL_RESISTANCE * InnerProduct(u, self.normal)
+        return {self.slip: WALL_RESISTANCE * InnerProduct(u, self.normal)
                 * InnerProduct(w, self.normal)}
 
     def tracking_boundary(self, u, w):
@@ -160,13 +163,27 @@ class Burgers2D(MRASProblem):
         return InnerProduct(grad(u), grad(w))
 
 
+class Burgers2DZeroSlip(Burgers2D):
+    """The same flow with no-slip barriers: u = 0 on them (the Dirichlet
+    part of U_h, where the inflow is not given, is zero), the walls still
+    slip.  The barriers then shed wakes instead of leaving only shadows; a
+    variant for the README's movie (``scripts/readme_media.py
+    --zero-slip``), not the papers' example, and not audited."""
+
+    name = "burgers_2d_zero_slip"
+    dirichlet_part = "inlet|barrier"
+    slip = "wall"
+
+
 # --- runner registration (mras.live reads these markers) ----------------------
 
-PROBLEM = Burgers2D
+PROBLEM = Burgers2D  # the papers' example, as the tests load it
+PROBLEMS = {"burgers_2d": Burgers2D,
+            "burgers_2d_zero_slip": Burgers2DZeroSlip}
 
 # Q_h is P0, the class of the shapes.
-DEFAULTS = {"burgers_2d": dict(h=0.05, dt=0.05, tend=100.0)}
+DEFAULTS = {name: dict(h=0.05, dt=0.05, tend=100.0) for name in PROBLEMS}
 # The audit stops under the inflow's ramp, where q has come from 0.44 to
 # 0.36.
 CHECK = {"burgers_2d": dict(h=0.35, dt=0.05, tend=8.0)}
-QUICK = CHECK
+QUICK = {name: CHECK["burgers_2d"] for name in PROBLEMS}

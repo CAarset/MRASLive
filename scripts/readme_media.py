@@ -23,10 +23,16 @@ and browsers show a frame of 10 ms or less for 100 ms (a rule inherited
 from GIF), so 90 frames a second (11 ms) is near the most it plays at;
 screens refreshing at 60 Hz show 60 of them.
 
+``--zero-slip`` does the same for ``burgers_2d_zero_slip``, the barriers
+no-slip instead of slip (``examples/burgers_2d.py``), into checkpoint and
+movie of their own (``..._zero_slip``, ``burgers2d_zero_slip.webp``) and
+without the banner; ``--until`` sets the model time to end at.
+
 Usage, from the repository's root:
 
     .venv/bin/python scripts/readme_media.py            # run (once), render
     .venv/bin/python scripts/readme_media.py --render   # render only
+    .venv/bin/python scripts/readme_media.py --zero-slip --until 30
 """
 
 import argparse
@@ -59,30 +65,33 @@ HEADING = ("MRASLive", "online parameter identification\nfor time-dependent PDEs
            "NGSolve · model reference adaptation · live")
 
 
-def simulate():
-    """The noise-free run, every step stored, to UNTIL whatever its error;
-    an interrupted one continues from its restart point."""
-    path = STEM.with_suffix(".h5")
+def simulate(name, stem, until):
+    """The noise-free run of example ``name``, every step stored, to
+    ``until`` whatever its error; an interrupted one continues from its
+    restart point."""
+    path = stem.with_suffix(".h5")
     if path.exists():
         if bool(load(path).attrs["completed"]):
             return
-        problem = build("burgers_2d", tend=UNTIL, **FINE)
+        problem = build(name, tend=until, **FINE)
         problem.target = 0.0
-        resume(path, tend=UNTIL, problem=problem, budget=None)
+        resume(path, tend=until, problem=problem, budget=None)
         return
-    STEM.parent.mkdir(parents=True, exist_ok=True)
-    run_live("burgers_2d", 0.0, tend=UNTIL, target=0.0, path=STEM,
+    stem.parent.mkdir(parents=True, exist_ok=True)
+    run_live(name, 0.0, tend=until, target=0.0, path=stem,
              budget=None, movie=False, **FINE)
 
 
-def render():
+def render(stem, until, target, banner=True):
     scale = {"q_range": Q_RANGE, "log_decades": DECADES, "ncolors": NCOLORS}
-    for target, width, options in (
-            (TARGET, PANEL_WIDTH, {"titles": TITLES}),
-            (BANNER, BANNER_WIDTH, {"titles": BANNER_TITLES, "title_size": 10,
-                                    "stamp": False, "heading": HEADING})):
-        path = render_movie(STEM.with_suffix(".h5"), target, fps=FPS, every=1,
-                            panel_width=width, layout="side", until=UNTIL,
+    movies = [(target, PANEL_WIDTH, {"titles": TITLES})]
+    if banner:
+        movies.append((BANNER, BANNER_WIDTH,
+                       {"titles": BANNER_TITLES, "title_size": 10,
+                        "stamp": False, "heading": HEADING}))
+    for path, width, options in movies:
+        path = render_movie(stem.with_suffix(".h5"), path, fps=FPS, every=1,
+                            panel_width=width, layout="side", until=until,
                             layout_options={**scale, **options})
         print(f"wrote {path} ({path.stat().st_size / 1e6:.1f} MB)")
 
@@ -91,10 +100,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--render", action="store_true",
                         help="render from the existing checkpoint only")
+    parser.add_argument("--zero-slip", action="store_true",
+                        help="no-slip barriers (burgers_2d_zero_slip), into "
+                             "a checkpoint and movie of their own, no banner")
+    parser.add_argument("--until", type=float, default=UNTIL,
+                        help=f"model time to end at (default {UNTIL:g})")
     args = parser.parse_args()
+    if args.zero_slip:
+        name = "burgers_2d_zero_slip"
+        stem = STEM.with_name(STEM.name + "_zero_slip")
+        target = TARGET.with_name("burgers2d_zero_slip.webp")
+    else:
+        name, stem, target = "burgers_2d", STEM, TARGET
     if not args.render:
-        simulate()
-    render()
+        simulate(name, stem, args.until)
+    render(stem, args.until, target, banner=not args.zero_slip)
 
 
 if __name__ == "__main__":
